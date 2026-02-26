@@ -36,6 +36,13 @@ export type WorldEditCommand =
       type: "updateSphereRadius";
       sphereId: string;
       radius: number;
+    }
+  | {
+      type: "enterSphere";
+      sphereId: string;
+    }
+  | {
+      type: "exitSphere";
     };
 
 export interface WorldStoreSnapshot {
@@ -47,44 +54,100 @@ export interface WorldStoreSnapshot {
 
 type WorldStoreListener = (snapshot: WorldStoreSnapshot, command: WorldEditCommand) => void;
 
+function cloneSphere(entity: SphereEntity): SphereEntity {
+  return {
+    id: entity.id,
+    parentId: entity.parentId,
+    radius: entity.radius,
+    position3d: [...entity.position3d],
+    dimensions: { ...entity.dimensions },
+    timeWindow: { ...entity.timeWindow },
+    tags: [...entity.tags],
+  };
+}
+
 export class LocalWorldStore {
-  private readonly parent: SphereEntity;
-  private readonly childrenById = new Map<string, SphereEntity>();
+  private readonly entitiesById = new Map<string, SphereEntity>();
   private readonly listeners = new Set<WorldStoreListener>();
 
+  private rootSphereId: string;
+  private activeParentId: string;
   private selectedSphereId: string | null = null;
   private version = 0;
 
   constructor(seedWorld: SeedWorld) {
-    this.parent = seedWorld.parent;
+    const parent = cloneSphere(seedWorld.parent);
+    this.rootSphereId = parent.id;
+    this.activeParentId = parent.id;
+    this.entitiesById.set(parent.id, parent);
 
     for (const child of seedWorld.children) {
-      if (child.parentId !== this.parent.id) {
-        continue;
-      }
-      this.childrenById.set(child.id, child);
+      this.entitiesById.set(child.id, cloneSphere(child));
     }
   }
 
+  private getActiveParent(): SphereEntity | null {
+    return this.entitiesById.get(this.activeParentId) ?? null;
+  }
+
   getParentSphere(): SphereEntity {
-    return this.parent;
+    const activeParent = this.getActiveParent();
+    if (activeParent) {
+      return activeParent;
+    }
+
+    const root = this.entitiesById.get(this.rootSphereId);
+    if (!root) {
+      throw new Error("World store is missing root sphere");
+    }
+
+    return root;
   }
 
   getSelectedSphereId(): string | null {
     return this.selectedSphereId;
   }
 
+  getSphereById(sphereId: string): SphereEntity | null {
+    return this.entitiesById.get(sphereId) ?? null;
+  }
+
   getChildSphereById(sphereId: string): SphereEntity | null {
-    return this.childrenById.get(sphereId) ?? null;
+    return this.getSphereById(sphereId);
   }
 
   listChildSpheres(): SphereEntity[] {
-    return [...this.childrenById.values()];
+    const activeParentId = this.activeParentId;
+    return [...this.entitiesById.values()].filter((entity) => entity.parentId === activeParentId);
+  }
+
+  listChildrenOf(parentId: string): SphereEntity[] {
+    return [...this.entitiesById.values()].filter((entity) => entity.parentId === parentId);
+  }
+
+  listDescendantsOf(parentId: string): SphereEntity[] {
+    const descendants: SphereEntity[] = [];
+    const queue: string[] = [parentId];
+
+    while (queue.length > 0) {
+      const currentParentId = queue.shift();
+      if (!currentParentId) {
+        continue;
+      }
+
+      const children = this.listChildrenOf(currentParentId);
+      for (const child of children) {
+        descendants.push(child);
+        queue.push(child.id);
+      }
+    }
+
+    return descendants;
   }
 
   getSnapshot(): WorldStoreSnapshot {
     return {
-      parent: this.parent,
+      parent: this.getParentSphere(),
       children: this.listChildSpheres(),
       selectedSphereId: this.selectedSphereId,
       version: this.version,
@@ -105,34 +168,34 @@ export class LocalWorldStore {
     switch (command.type) {
       case "hydrateWorld": {
         const { world } = command;
+        const previousActiveParentId = this.activeParentId;
+        const previousSelectedSphereId = this.selectedSphereId;
 
-        if (world.parent.id !== this.parent.id) {
-          return false;
-        }
-
-        this.parent.radius = world.parent.radius;
-        this.parent.position3d = [...world.parent.position3d];
-        this.parent.dimensions = { ...world.parent.dimensions };
-        this.parent.timeWindow = { ...world.parent.timeWindow };
-        this.parent.tags = [...world.parent.tags];
-
-        this.childrenById.clear();
+        this.entitiesById.clear();
+        const rootSphere = cloneSphere(world.parent);
+        this.entitiesById.set(rootSphere.id, rootSphere);
         for (const child of world.children) {
-          if (child.parentId !== this.parent.id) {
-            continue;
-          }
-
-          this.childrenById.set(child.id, {
-            ...child,
-            parentId: this.parent.id,
-          });
+          this.entitiesById.set(child.id, cloneSphere(child));
         }
 
+        this.rootSphereId = rootSphere.id;
+        this.activeParentId = this.entitiesById.has(previousActiveParentId)
+          ? previousActiveParentId
+          : rootSphere.id;
+
+        this.selectedSphereId = previousSelectedSphereId;
         if (
-          this.selectedSphereId !== null &&
-          !this.childrenById.has(this.selectedSphereId)
+          this.selectedSphereId &&
+          !this.entitiesById.has(this.selectedSphereId)
         ) {
           this.selectedSphereId = null;
+        }
+
+        if (this.selectedSphereId) {
+          const selected = this.entitiesById.get(this.selectedSphereId);
+          if (!selected || selected.parentId !== this.activeParentId) {
+            this.selectedSphereId = null;
+          }
         }
 
         changed = true;
@@ -141,18 +204,18 @@ export class LocalWorldStore {
 
       case "createSphere": {
         const { sphere } = command;
-        if (this.childrenById.has(sphere.id)) {
+        if (this.entitiesById.has(sphere.id)) {
           return false;
         }
 
-        const parentId = sphere.parentId ?? this.parent.id;
-        if (parentId !== this.parent.id) {
+        const parentId = sphere.parentId ?? this.activeParentId;
+        if (!this.entitiesById.has(parentId)) {
           return false;
         }
 
-        this.childrenById.set(sphere.id, {
-          ...sphere,
-          parentId: this.parent.id,
+        this.entitiesById.set(sphere.id, {
+          ...cloneSphere(sphere),
+          parentId,
         });
 
         if (command.selectCreated === true) {
@@ -164,7 +227,8 @@ export class LocalWorldStore {
       }
 
       case "selectSphere": {
-        if (!this.childrenById.has(command.sphereId)) {
+        const sphere = this.entitiesById.get(command.sphereId);
+        if (!sphere || sphere.parentId !== this.activeParentId) {
           return false;
         }
 
@@ -188,11 +252,19 @@ export class LocalWorldStore {
       }
 
       case "deleteSphere": {
-        if (!this.childrenById.has(command.sphereId)) {
+        const sphere = this.entitiesById.get(command.sphereId);
+        if (!sphere || sphere.parentId !== this.activeParentId) {
           return false;
         }
 
-        this.childrenById.delete(command.sphereId);
+        const hasChildren = [...this.entitiesById.values()].some(
+          (item) => item.parentId === command.sphereId,
+        );
+        if (hasChildren) {
+          return false;
+        }
+
+        this.entitiesById.delete(command.sphereId);
         if (this.selectedSphereId === command.sphereId) {
           this.selectedSphereId = null;
         }
@@ -201,7 +273,7 @@ export class LocalWorldStore {
       }
 
       case "updateSphereDimensions": {
-        const sphere = this.childrenById.get(command.sphereId);
+        const sphere = this.entitiesById.get(command.sphereId);
         if (!sphere) {
           return false;
         }
@@ -229,7 +301,7 @@ export class LocalWorldStore {
       }
 
       case "updateSpherePosition": {
-        const sphere = this.childrenById.get(command.sphereId);
+        const sphere = this.entitiesById.get(command.sphereId);
         if (!sphere) {
           return false;
         }
@@ -243,13 +315,33 @@ export class LocalWorldStore {
           return false;
         }
 
+        const previousPosition: [number, number, number] = [...sphere.position3d];
         sphere.position3d = [...next];
+
+        const deltaX = next[0] - previousPosition[0];
+        const deltaY = next[1] - previousPosition[1];
+        const deltaZ = next[2] - previousPosition[2];
+
+        if (
+          Math.abs(deltaX) > 1e-6 ||
+          Math.abs(deltaY) > 1e-6 ||
+          Math.abs(deltaZ) > 1e-6
+        ) {
+          for (const descendant of this.listDescendantsOf(sphere.id)) {
+            descendant.position3d = [
+              descendant.position3d[0] + deltaX,
+              descendant.position3d[1] + deltaY,
+              descendant.position3d[2] + deltaZ,
+            ];
+          }
+        }
+
         changed = true;
         break;
       }
 
       case "updateSphereRadius": {
-        const sphere = this.childrenById.get(command.sphereId);
+        const sphere = this.entitiesById.get(command.sphereId);
         if (!sphere) {
           return false;
         }
@@ -262,7 +354,53 @@ export class LocalWorldStore {
           return false;
         }
 
+        const previousRadius = sphere.radius;
         sphere.radius = command.radius;
+
+        const scale = command.radius / previousRadius;
+        if (Number.isFinite(scale) && scale > 0 && Math.abs(scale - 1) > 1e-6) {
+          const centerX = sphere.position3d[0];
+          const centerY = sphere.position3d[1];
+          const centerZ = sphere.position3d[2];
+
+          for (const descendant of this.listDescendantsOf(sphere.id)) {
+            const offsetX = descendant.position3d[0] - centerX;
+            const offsetY = descendant.position3d[1] - centerY;
+            const offsetZ = descendant.position3d[2] - centerZ;
+
+            descendant.position3d = [
+              centerX + offsetX * scale,
+              centerY + offsetY * scale,
+              centerZ + offsetZ * scale,
+            ];
+            descendant.radius = Math.max(0.01, descendant.radius * scale);
+          }
+        }
+
+        changed = true;
+        break;
+      }
+
+      case "enterSphere": {
+        const sphere = this.entitiesById.get(command.sphereId);
+        if (!sphere || sphere.parentId !== this.activeParentId) {
+          return false;
+        }
+
+        this.activeParentId = sphere.id;
+        this.selectedSphereId = null;
+        changed = true;
+        break;
+      }
+
+      case "exitSphere": {
+        const activeParent = this.getActiveParent();
+        if (!activeParent || activeParent.parentId === null) {
+          return false;
+        }
+
+        this.activeParentId = activeParent.parentId;
+        this.selectedSphereId = null;
         changed = true;
         break;
       }

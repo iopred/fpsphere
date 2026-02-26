@@ -76,6 +76,6 @@ export function buildSeedWorld(): SeedWorld {
 
   return {
     parent,
-    children: entities.filter((entity) => entity.parentId === parent.id),
+    children: entities.filter((entity) => entity.id !== parent.id),
   };
 }

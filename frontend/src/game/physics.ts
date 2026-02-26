@@ -6,6 +6,9 @@ export interface ObstacleBody {
   radius: number;
   money: number;
   selectable: boolean;
+  collidable: boolean;
+  portalHost: boolean;
+  instancedSubworld: boolean;
 }
 
 export interface PlayerBody {
@@ -55,6 +58,10 @@ export function resolveSphereCollisions(
   player.grounded = false;
 
   for (const obstacle of obstacles) {
+    if (!obstacle.collidable) {
+      continue;
+    }
+
     scratchDelta.copy(player.position).sub(obstacle.center);
     const distance = scratchDelta.length();
     const minimumDistance = obstacle.radius + player.radius;

@@ -73,7 +73,8 @@ export class GameApp {
 
   private readonly controller: FpsController;
   private readonly worldStore = new LocalWorldStore(buildSeedWorld());
-  private readonly parentSphere = this.worldStore.getParentSphere();
+  private parentSphere = this.worldStore.getParentSphere();
+  private parentMesh: THREE.Mesh | null = null;
 
   private readonly parentCenter = new THREE.Vector3(
     this.parentSphere.position3d[0],
@@ -106,7 +107,7 @@ export class GameApp {
   private lastCollisionCount = 0;
   private overlayEnabled = false;
   private editorMode = false;
-  private createTemplateId = this.templateIdChoices.includes(1) ? 1 : TEMPLATE_NONE_ID;
+  private createTemplateId = TEMPLATE_NONE_ID;
   private draggingSphereId: string | null = null;
   private dragDistance = CREATE_DISTANCE;
   private createdSphereCount = 0;
@@ -269,7 +270,7 @@ export class GameApp {
     rimLight.position.set(-24, 18, -12);
     this.scene.add(rimLight);
 
-    const parentGeometry = new THREE.SphereGeometry(this.parentSphere.radius, 48, 32);
+    const parentGeometry = new THREE.SphereGeometry(1, 48, 32);
     const parentMaterial = new THREE.MeshStandardMaterial({
       color: 0x2d3f58,
       roughness: 0.92,
@@ -282,19 +283,28 @@ export class GameApp {
 
     const parentMesh = new THREE.Mesh(parentGeometry, parentMaterial);
     parentMesh.position.copy(this.parentCenter);
+    parentMesh.scale.setScalar(this.parentSphere.radius);
     this.scene.add(parentMesh);
-    this.worldMeshes.set(this.parentSphere.id, parentMesh);
+    this.parentMesh = parentMesh;
 
     this.syncObstaclesFromSnapshot(this.worldStore.getSnapshot());
   }
 
-  private buildObstacleBody(entity: SphereEntity): ObstacleBody {
+  private buildObstacleBody(
+    entity: SphereEntity,
+    portalHost: boolean,
+    instancedSubworld: boolean,
+    selectable: boolean = !entity.tags.includes("instanced-subworld"),
+  ): ObstacleBody {
     return {
       id: entity.id,
       center: new THREE.Vector3(entity.position3d[0], entity.position3d[1], entity.position3d[2]),
       radius: entity.radius,
       money: entity.dimensions.money ?? 0,
-      selectable: !entity.tags.includes("instanced-subworld"),
+      selectable,
+      collidable: !portalHost,
+      portalHost,
+      instancedSubworld,
     };
   }
 
@@ -306,14 +316,15 @@ export class GameApp {
       this.stopDraggingSphere();
     }
 
+    this.parentSphere = snapshot.parent;
     this.parentCenter.set(
       snapshot.parent.position3d[0],
       snapshot.parent.position3d[1],
       snapshot.parent.position3d[2],
     );
-    const parentMesh = this.worldMeshes.get(this.parentSphere.id);
-    if (parentMesh) {
-      parentMesh.position.copy(this.parentCenter);
+    if (this.parentMesh) {
+      this.parentMesh.position.copy(this.parentCenter);
+      this.parentMesh.scale.setScalar(this.parentSphere.radius);
     }
     this.syncObstaclesFromSnapshot(snapshot);
     this.updateTemplateHud();
@@ -438,6 +449,28 @@ export class GameApp {
     }
 
     return false;
+  }
+
+  private queueCreateSphereOperation(sphere: SphereEntity): void {
+    const alreadyQueued = this.pendingCommitOperations.some(
+      (operation) => operation.type === "create" && operation.sphere.id === sphere.id,
+    );
+    if (alreadyQueued) {
+      return;
+    }
+
+    this.pendingCommitOperations.push({
+      type: "create",
+      sphere: {
+        id: sphere.id,
+        parentId: sphere.parentId,
+        radius: sphere.radius,
+        position3d: [...sphere.position3d],
+        dimensions: { ...sphere.dimensions },
+        timeWindow: { ...sphere.timeWindow },
+        tags: [...sphere.tags],
+      },
+    });
   }
 
   private queueMoveOperation(sphereId: string, position3d: [number, number, number]): void {
@@ -631,6 +664,79 @@ export class GameApp {
     this.selectedTemplateIncreaseButton.disabled = !selectedEnabled;
   }
 
+  private movePlayerToCurrentWorld(): void {
+    const radius = this.parentSphere.radius;
+    const minOffset = PLAYER_RADIUS + 0.75;
+    const maxOffset = Math.max(minOffset, radius - PLAYER_RADIUS - 0.75);
+    const depthOffset = Math.min(Math.max(radius * 0.25, minOffset), maxOffset);
+
+    this.player.position.set(
+      this.parentCenter.x,
+      this.parentCenter.y - Math.min(2, radius * 0.18),
+      this.parentCenter.z + depthOffset,
+    );
+    this.player.velocity.set(0, 0, 0);
+  }
+
+  private handleEnterOrExitWorldShortcut(): void {
+    const selectedSphere = this.getSelectedEditableSphere();
+    if (selectedSphere) {
+      const templateId = this.readTemplateId(selectedSphere);
+      if (templateId > TEMPLATE_NONE_ID) {
+        this.seedTemplateWorldIfNeeded(selectedSphere);
+        const entered = this.worldStore.apply({
+          type: "enterSphere",
+          sphereId: selectedSphere.id,
+        });
+        if (entered) {
+          this.stopDraggingSphere();
+          this.movePlayerToCurrentWorld();
+        }
+        return;
+      }
+    }
+
+    const exited = this.worldStore.apply({ type: "exitSphere" });
+    if (exited) {
+      this.stopDraggingSphere();
+      this.movePlayerToCurrentWorld();
+    }
+  }
+
+  private seedTemplateWorldIfNeeded(hostSphere: SphereEntity): void {
+    const templateId = this.readTemplateId(hostSphere);
+    if (templateId <= TEMPLATE_NONE_ID) {
+      return;
+    }
+
+    if (this.worldStore.listDescendantsOf(hostSphere.id).length > 0) {
+      return;
+    }
+
+    const templateChildren = instantiateSubworldChildren([hostSphere]).map((child) => ({
+      ...child,
+      tags: child.tags.filter((tag) => tag !== "instanced-subworld"),
+    }));
+
+    let createdCount = 0;
+    for (const child of templateChildren) {
+      const created = this.worldStore.apply({
+        type: "createSphere",
+        sphere: child,
+      });
+      if (!created) {
+        continue;
+      }
+
+      this.queueCreateSphereOperation(child);
+      createdCount += 1;
+    }
+
+    if (createdCount > 0) {
+      this.refreshPendingSaveMessage();
+    }
+  }
+
   private stopDraggingSphere(): void {
     this.draggingSphereId = null;
   }
@@ -697,18 +803,55 @@ export class GameApp {
   }
 
   private syncObstaclesFromSnapshot(snapshot: WorldStoreSnapshot): void {
-    const expandedChildren = [
-      ...snapshot.children,
-      ...instantiateSubworldChildren(snapshot.children),
-    ];
+    const templateHosts = snapshot.parent.parentId === null
+      ? [snapshot.parent, ...snapshot.children]
+      : [...snapshot.children];
+    const expandedChildren: SphereEntity[] = [];
+    const expandedIds = new Set<string>();
+
+    const pushExpanded = (entity: SphereEntity): void => {
+      if (expandedIds.has(entity.id)) {
+        return;
+      }
+      expandedChildren.push(entity);
+      expandedIds.add(entity.id);
+    };
+
+    for (const child of snapshot.children) {
+      pushExpanded(child);
+    }
+
+    for (const child of snapshot.children) {
+      for (const descendant of this.worldStore.listDescendantsOf(child.id)) {
+        pushExpanded(descendant);
+      }
+    }
+
+    for (const instancedChild of instantiateSubworldChildren(templateHosts)) {
+      pushExpanded(instancedChild);
+    }
+
     const nextIds = new Set<string>();
 
     for (const entity of expandedChildren) {
       nextIds.add(entity.id);
+      const instancedSubworld = entity.tags.includes("instanced-subworld");
+      const templateId = entity.dimensions[SUBWORLD_TEMPLATE_DIMENSION];
+      const portalHost =
+        entity.parentId === snapshot.parent.id &&
+        Number.isFinite(templateId) &&
+        Math.trunc(templateId) > TEMPLATE_NONE_ID;
+      const selectable =
+        entity.parentId === snapshot.parent.id && !instancedSubworld;
 
       const existingBody = this.obstacleBodiesById.get(entity.id);
       if (!existingBody) {
-        const body = this.buildObstacleBody(entity);
+        const body = this.buildObstacleBody(
+          entity,
+          portalHost,
+          instancedSubworld,
+          selectable,
+        );
         this.obstacleBodiesById.set(entity.id, body);
         this.addObstacleMesh(body);
         continue;
@@ -717,11 +860,18 @@ export class GameApp {
       existingBody.center.set(entity.position3d[0], entity.position3d[1], entity.position3d[2]);
       existingBody.radius = entity.radius;
       existingBody.money = entity.dimensions.money ?? 0;
+      existingBody.selectable = selectable;
+      existingBody.collidable = !portalHost;
+      existingBody.portalHost = portalHost;
+      existingBody.instancedSubworld = instancedSubworld;
 
       const existingMesh = this.obstacleMeshes.get(entity.id);
       if (existingMesh) {
         existingMesh.position.copy(existingBody.center);
         existingMesh.scale.setScalar(existingBody.radius);
+        existingMesh.userData.selectable = existingBody.selectable;
+        existingMesh.userData.portalHost = existingBody.portalHost;
+        existingMesh.userData.instancedSubworld = existingBody.instancedSubworld;
       }
     }
 
@@ -886,6 +1036,8 @@ export class GameApp {
     obstacleMesh.scale.setScalar(obstacle.radius);
     obstacleMesh.userData.sphereId = obstacle.id;
     obstacleMesh.userData.selectable = obstacle.selectable;
+    obstacleMesh.userData.portalHost = obstacle.portalHost;
+    obstacleMesh.userData.instancedSubworld = obstacle.instancedSubworld;
     this.scene.add(obstacleMesh);
     this.worldMeshes.set(obstacle.id, obstacleMesh);
     this.obstacleMeshes.set(obstacle.id, obstacleMesh);
@@ -1072,6 +1224,12 @@ export class GameApp {
       return;
     }
 
+    if (matchesKeyBinding(event, KEYBINDINGS.enterSelectedSphereWorld)) {
+      event.preventDefault();
+      this.handleEnterOrExitWorldShortcut();
+      return;
+    }
+
     if (matchesKeyBinding(event, KEYBINDINGS.deleteSelectedSphere)) {
       event.preventDefault();
       this.deleteSelectedSphere();
@@ -1165,6 +1323,18 @@ export class GameApp {
       obstacleMesh.material.color.copy(baseColor).lerp(overlayColor, blend);
       obstacleMesh.material.emissive.setHex(0x000000).lerp(new THREE.Color(0x103a8f), blend * 0.35);
 
+      if (obstacle.portalHost) {
+        obstacleMesh.material.transparent = true;
+        obstacleMesh.material.opacity = 0.24;
+        obstacleMesh.material.depthWrite = false;
+        obstacleMesh.material.wireframe = true;
+      } else {
+        obstacleMesh.material.transparent = false;
+        obstacleMesh.material.opacity = 1;
+        obstacleMesh.material.depthWrite = true;
+        obstacleMesh.material.wireframe = false;
+      }
+
       const selected = obstacle.id === selectedSphereId;
       if (selected) {
         obstacleMesh.material.emissive.lerp(new THREE.Color(0xffae42), 0.75);
@@ -1194,13 +1364,25 @@ export class GameApp {
     const id = `sphere-user-${String(this.createdSphereCount).padStart(3, "0")}`;
     this.camera.getWorldDirection(tempForward);
 
+    const createdSphereRadius = Number(
+      Math.min(
+        CREATED_SPHERE_RADIUS,
+        Math.max(MIN_EDIT_RADIUS * 2, this.parentSphere.radius * 0.12),
+      ).toFixed(3),
+    );
+    const minimumCreateDistance = PLAYER_RADIUS + createdSphereRadius + 0.8;
+    const createDistance = Math.min(
+      CREATE_DISTANCE,
+      Math.max(minimumCreateDistance, this.parentSphere.radius * 0.42),
+    );
+
     const center = this.player.position
       .clone()
-      .addScaledVector(tempForward.normalize(), CREATE_DISTANCE);
+      .addScaledVector(tempForward.normalize(), createDistance);
 
     tempOffset.copy(center).sub(this.parentCenter);
     const distanceFromCenter = tempOffset.length();
-    const maxDistance = this.parentSphere.radius - CREATED_SPHERE_RADIUS - CREATE_BOUNDARY_MARGIN;
+    const maxDistance = this.parentSphere.radius - createdSphereRadius - CREATE_BOUNDARY_MARGIN;
     if (distanceFromCenter > maxDistance) {
       if (distanceFromCenter > 1e-6) {
         center.copy(this.parentCenter).addScaledVector(tempOffset.normalize(), maxDistance);
@@ -1225,7 +1407,7 @@ export class GameApp {
     const sphere: SphereEntity = {
       id,
       parentId: this.parentSphere.id,
-      radius: CREATED_SPHERE_RADIUS,
+      radius: createdSphereRadius,
       position3d: [center.x, center.y, center.z],
       dimensions,
       timeWindow: {
@@ -1242,10 +1424,7 @@ export class GameApp {
     });
 
     if (changed) {
-      this.pendingCommitOperations.push({
-        type: "create",
-        sphere,
-      });
+      this.queueCreateSphereOperation(sphere);
       this.refreshPendingSaveMessage();
     }
   }
@@ -1308,7 +1487,7 @@ export class GameApp {
   private updateHintText(): void {
     if (this.editorMode) {
       this.hintNode.textContent =
-        "EDIT MODE | ~ exit | C create | E select | Q deselect | Z delete | wheel resize | hold RMB drag";
+        "EDIT MODE | ~ exit editor | C create | E select | F enter selected template / exit | Q deselect | Z delete | wheel resize | hold RMB drag";
       return;
     }
 
@@ -1330,6 +1509,7 @@ export class GameApp {
       `dragging: ${this.draggingSphereId ?? "none"}\n` +
       `create template: ${this.createTemplateId}\n` +
       `selected: ${selectedSphereId ?? "none"}\n` +
+      `world parent: ${this.parentSphere.id}\n` +
       `spheres: ${this.obstacles.length}\n` +
       `world source: ${this.worldSourceState}\n` +
       `world tick: ${this.backendWorldTick}\n` +

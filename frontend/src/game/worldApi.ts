@@ -175,7 +175,7 @@ export function parseLoadedWorldSnapshot(payload: BackendWorldSnapshot): LoadedW
     tick: payload.tick,
     world: {
       parent,
-      children: parsedEntities.filter((entity) => entity.parentId === parent.id),
+      children: parsedEntities.filter((entity) => entity.id !== parent.id),
     },
   };
 }

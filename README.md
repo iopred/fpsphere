@@ -36,13 +36,16 @@ Initial implementation scaffold for:
    - Open multiple browser tabs/windows to see remote players.
 7. Subworld instancing:
    - Spheres with `dimensions.world_template` are expanded client-side into scaled sub-spheres.
-   - Editor-created spheres currently default to `world_template = 1` and `world_scale = 1`.
+   - Editor-created spheres default to `world_template = 0` (no template instancing).
 8. Template selector HUD:
    - Top-right HUD lets you pick the template id used by `C` create in editor mode.
    - The same HUD can change `world_template` on the currently selected sphere.
 9. Editor transform controls:
    - Mouse wheel resizes the selected sphere radius.
    - Hold right mouse button to drag the selected sphere along your view direction.
+10. Sphere world navigation:
+   - `F` in editor mode enters the template world of the selected sphere (`world_template > 0`).
+   - `F` with no selected sphere exits back to the parent world.
 
 ### Backend
 

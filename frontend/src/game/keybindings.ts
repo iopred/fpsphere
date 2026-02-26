@@ -36,6 +36,11 @@ export const KEYBINDINGS = {
     codes: ["KeyZ"],
     mode: "code",
   },
+  enterSelectedSphereWorld: {
+    keys: ["f"],
+    codes: ["KeyF"],
+    mode: "code",
+  },
 } satisfies Record<string, KeyBinding>;
 
 export function matchesKeyBinding(event: KeyboardEvent, binding: KeyBinding): boolean {

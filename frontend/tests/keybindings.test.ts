@@ -52,4 +52,19 @@ describe("keybindings", () => {
     });
     expect(matchesKeyBinding(event, KEYBINDINGS.deselectSphere)).toBe(false);
   });
+
+  it("enter-world action triggers only from physical F key", () => {
+    const physicalF = keyboardEventStub({
+      key: "u",
+      code: "KeyF",
+    });
+
+    const nonPhysicalF = keyboardEventStub({
+      key: "f",
+      code: "KeyU",
+    });
+
+    expect(matchesKeyBinding(physicalF, KEYBINDINGS.enterSelectedSphereWorld)).toBe(true);
+    expect(matchesKeyBinding(nonPhysicalF, KEYBINDINGS.enterSelectedSphereWorld)).toBe(false);
+  });
 });

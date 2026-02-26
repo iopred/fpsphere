@@ -265,8 +265,8 @@ fn apply_commit_operations(
                 sphere_id,
                 position_3d,
             } => {
-                let entity = world.entities.iter_mut().find(|item| item.id == *sphere_id);
-                let entity = match entity {
+                let entity_index = world.entities.iter().position(|item| item.id == *sphere_id);
+                let entity_index = match entity_index {
                     Some(value) => value,
                     None => {
                         return Err(vec![format!(
@@ -276,7 +276,26 @@ fn apply_commit_operations(
                     }
                 };
 
-                entity.position_3d = *position_3d;
+                let previous = world.entities[entity_index].position_3d;
+                let delta = [
+                    position_3d[0] - previous[0],
+                    position_3d[1] - previous[1],
+                    position_3d[2] - previous[2],
+                ];
+
+                world.entities[entity_index].position_3d = *position_3d;
+
+                if delta.iter().any(|value| value.abs() > f32::EPSILON) {
+                    let descendant_indexes = collect_descendant_indexes(world, sphere_id);
+                    for descendant_index in descendant_indexes {
+                        let descendant = &mut world.entities[descendant_index];
+                        descendant.position_3d = [
+                            descendant.position_3d[0] + delta[0],
+                            descendant.position_3d[1] + delta[1],
+                            descendant.position_3d[2] + delta[2],
+                        ];
+                    }
+                }
             }
 
             CommitOperation::UpdateDimensions {
@@ -307,8 +326,8 @@ fn apply_commit_operations(
                     )]);
                 }
 
-                let entity = world.entities.iter_mut().find(|item| item.id == *sphere_id);
-                let entity = match entity {
+                let entity_index = world.entities.iter().position(|item| item.id == *sphere_id);
+                let entity_index = match entity_index {
                     Some(value) => value,
                     None => {
                         return Err(vec![format!(
@@ -318,12 +337,57 @@ fn apply_commit_operations(
                     }
                 };
 
-                entity.radius = *radius;
+                let previous_radius = world.entities[entity_index].radius;
+                if !previous_radius.is_finite() || previous_radius <= 0.0 {
+                    return Err(vec![format!(
+                        "update_radius failed: sphere '{}' has invalid existing radius",
+                        sphere_id
+                    )]);
+                }
+
+                let scale = *radius / previous_radius;
+                let center = world.entities[entity_index].position_3d;
+                world.entities[entity_index].radius = *radius;
+
+                if scale.is_finite() && scale > 0.0 && (scale - 1.0).abs() > f32::EPSILON {
+                    let descendant_indexes = collect_descendant_indexes(world, sphere_id);
+                    for descendant_index in descendant_indexes {
+                        let descendant = &mut world.entities[descendant_index];
+                        let offset_x = descendant.position_3d[0] - center[0];
+                        let offset_y = descendant.position_3d[1] - center[1];
+                        let offset_z = descendant.position_3d[2] - center[2];
+
+                        descendant.position_3d = [
+                            center[0] + offset_x * scale,
+                            center[1] + offset_y * scale,
+                            center[2] + offset_z * scale,
+                        ];
+                        descendant.radius = (descendant.radius * scale).max(0.01);
+                    }
+                }
             }
         }
     }
 
     Ok(())
+}
+
+fn collect_descendant_indexes(world: &WorldSnapshot, parent_id: &str) -> Vec<usize> {
+    let mut indexes = Vec::new();
+    let mut stack = vec![parent_id.to_string()];
+
+    while let Some(current_parent_id) = stack.pop() {
+        for (index, entity) in world.entities.iter().enumerate() {
+            if entity.parent_id.as_deref() != Some(current_parent_id.as_str()) {
+                continue;
+            }
+
+            indexes.push(index);
+            stack.push(entity.id.clone());
+        }
+    }
+
+    indexes
 }
 
 pub fn example_world_snapshot() -> WorldSnapshot {
@@ -426,6 +490,26 @@ mod tests {
             parent_id: Some("sphere-world-001".to_string()),
             radius: 2.0,
             position_3d: [1.0, 2.0, 3.0],
+            dimensions: BTreeMap::new(),
+            time_window: TimeWindow {
+                start_tick: 0,
+                end_tick: None,
+            },
+            tags: vec!["test".to_string()],
+        }
+    }
+
+    fn make_child_sphere(
+        id: &str,
+        parent_id: &str,
+        radius: f32,
+        position_3d: [f32; 3],
+    ) -> SphereEntity {
+        SphereEntity {
+            id: id.to_string(),
+            parent_id: Some(parent_id.to_string()),
+            radius,
+            position_3d,
             dimensions: BTreeMap::new(),
             time_window: TimeWindow {
                 start_tick: 0,
@@ -615,5 +699,98 @@ mod tests {
             .find(|item| item.id == "sphere-building-001")
             .expect("updated sphere");
         assert_eq!(updated.radius, 14.5);
+    }
+
+    #[test]
+    fn move_operation_translates_descendants() {
+        let mut repository = WorldRepository::new(example_world_snapshot());
+
+        repository
+            .commit(
+                "world-main",
+                CommitRequest {
+                    user_id: "alice".to_string(),
+                    base_tick: 0,
+                    operations: vec![CommitOperation::Create {
+                        sphere: make_child_sphere(
+                            "sphere-world-instance-child-001",
+                            "sphere-world-instance-001",
+                            2.0,
+                            [21.0, -3.0, 19.0],
+                        ),
+                    }],
+                },
+            )
+            .expect("child create should succeed");
+
+        let response = repository
+            .commit(
+                "world-main",
+                CommitRequest {
+                    user_id: "alice".to_string(),
+                    base_tick: 1,
+                    operations: vec![CommitOperation::Move {
+                        sphere_id: "sphere-world-instance-001".to_string(),
+                        position_3d: [23.0, -1.0, 8.0],
+                    }],
+                },
+            )
+            .expect("move should succeed");
+
+        let moved_child = response
+            .world
+            .entities
+            .iter()
+            .find(|item| item.id == "sphere-world-instance-child-001")
+            .expect("moved child");
+
+        assert_eq!(moved_child.position_3d, [26.0, -2.0, 13.0]);
+    }
+
+    #[test]
+    fn update_radius_scales_descendants() {
+        let mut repository = WorldRepository::new(example_world_snapshot());
+
+        repository
+            .commit(
+                "world-main",
+                CommitRequest {
+                    user_id: "alice".to_string(),
+                    base_tick: 0,
+                    operations: vec![CommitOperation::Create {
+                        sphere: make_child_sphere(
+                            "sphere-world-instance-child-002",
+                            "sphere-world-instance-001",
+                            2.0,
+                            [21.0, -3.0, 19.0],
+                        ),
+                    }],
+                },
+            )
+            .expect("child create should succeed");
+
+        let response = repository
+            .commit(
+                "world-main",
+                CommitRequest {
+                    user_id: "alice".to_string(),
+                    base_tick: 1,
+                    operations: vec![CommitOperation::UpdateRadius {
+                        sphere_id: "sphere-world-instance-001".to_string(),
+                        radius: 24.0,
+                    }],
+                },
+            )
+            .expect("radius update should succeed");
+
+        let scaled_child = response
+            .world
+            .entities
+            .iter()
+            .find(|item| item.id == "sphere-world-instance-child-002")
+            .expect("scaled child");
+
+        assert_eq!(scaled_child.radius, 4.0);
+        assert_eq!(scaled_child.position_3d, [24.0, -4.0, 24.0]);
     }
 }
