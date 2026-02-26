@@ -775,32 +775,34 @@ export class GameApp {
     return derived;
   }
 
-  private getTemplateChoiceIndex(templateId: number): number {
-    const exactIndex = this.templateIdChoices.indexOf(templateId);
-    if (exactIndex >= 0) {
-      return exactIndex;
+  private getCreateTemplateMaxId(): number {
+    let maxTemplateId = this.templateIdChoices[this.templateIdChoices.length - 1] ?? TEMPLATE_NONE_ID;
+
+    const root = this.worldStore.getRootSphere();
+    maxTemplateId = Math.max(maxTemplateId, this.readTemplateId(root));
+    for (const sphere of this.worldStore.listDescendantsOf(root.id)) {
+      maxTemplateId = Math.max(maxTemplateId, this.readTemplateId(sphere));
     }
 
-    let nearestIndex = 0;
-    let nearestDistance = Number.POSITIVE_INFINITY;
-    for (let index = 0; index < this.templateIdChoices.length; index += 1) {
-      const distance = Math.abs(this.templateIdChoices[index] - templateId);
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearestIndex = index;
-      }
-    }
-
-    return nearestIndex;
+    return maxTemplateId;
   }
 
-  private stepTemplateId(currentTemplateId: number, delta: number): number {
-    const currentIndex = this.getTemplateChoiceIndex(currentTemplateId);
-    const nextIndex = Math.max(
-      0,
-      Math.min(this.templateIdChoices.length - 1, currentIndex + delta),
-    );
-    return this.templateIdChoices[nextIndex];
+  private stepTemplateId(
+    currentTemplateId: number,
+    delta: number,
+    allowBeyondKnownChoices: boolean = false,
+  ): number {
+    const base = Number.isFinite(currentTemplateId)
+      ? Math.max(TEMPLATE_NONE_ID, Math.trunc(currentTemplateId))
+      : TEMPLATE_NONE_ID;
+    const step = delta < 0 ? -1 : 1;
+    const nextId = Math.max(TEMPLATE_NONE_ID, base + step);
+
+    if (allowBeyondKnownChoices) {
+      return nextId;
+    }
+
+    return Math.min(this.getCreateTemplateMaxId(), nextId);
   }
 
   private adjustCreateTemplateId(delta: number): void {
@@ -819,7 +821,7 @@ export class GameApp {
     }
 
     const currentTemplateId = this.readTemplateId(selectedSphere);
-    const nextTemplateId = this.stepTemplateId(currentTemplateId, delta);
+    const nextTemplateId = this.stepTemplateId(currentTemplateId, delta, true);
     if (nextTemplateId === currentTemplateId) {
       return;
     }
