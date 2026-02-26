@@ -1,0 +1,441 @@
+import * as THREE from "three";
+import type { SphereEntity } from "@fpsphere/shared-types";
+import { FpsController } from "./FpsController";
+import {
+  constrainInsideParentSphere,
+  resolveSphereCollisions,
+  type ObstacleBody,
+  type PlayerBody,
+} from "./physics";
+import { KEYBINDINGS, matchesKeyBinding } from "./keybindings";
+import { buildSeedWorld } from "./worldSeed";
+
+const FIXED_STEP_SECONDS = 1 / 60;
+const MOVE_SPEED = 18;
+const AIR_CONTROL = 3.2;
+const JUMP_SPEED = 11.5;
+const GRAVITY = 26;
+const PLAYER_RADIUS = 1.0;
+const DRAG_GROUNDED = 14;
+const DRAG_AIR = 0.8;
+const CREATED_SPHERE_RADIUS = 2.4;
+const CREATE_DISTANCE = 8;
+const CREATE_BOUNDARY_MARGIN = 0.35;
+
+const tempForward = new THREE.Vector3();
+const tempOffset = new THREE.Vector3();
+const tempRaycastPoint = new THREE.Vector2(0, 0);
+
+export class GameApp {
+  private readonly scene = new THREE.Scene();
+  private readonly camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
+  private readonly renderer = new THREE.WebGLRenderer({ antialias: true });
+  private readonly clock = new THREE.Clock();
+  private readonly hudNode: HTMLDivElement;
+  private readonly hintNode: HTMLDivElement;
+  private readonly crosshairNode: HTMLDivElement;
+
+  private readonly controller: FpsController;
+  private readonly world = buildSeedWorld();
+  private readonly parentSphere = this.world.parent;
+  private obstacles = this.buildObstacleBodies(this.world.children);
+
+  private readonly parentCenter = new THREE.Vector3(
+    this.parentSphere.position3d[0],
+    this.parentSphere.position3d[1],
+    this.parentSphere.position3d[2],
+  );
+
+  private readonly player: PlayerBody = {
+    position: new THREE.Vector3(0, -2.5, 16),
+    velocity: new THREE.Vector3(),
+    radius: PLAYER_RADIUS,
+    grounded: false,
+  };
+
+  private readonly worldMeshes = new Map<string, THREE.Mesh>();
+  private readonly obstacleMeshes = new Map<string, THREE.Mesh>();
+  private readonly raycaster = new THREE.Raycaster();
+  private accumulatorSeconds = 0;
+  private tick = 0;
+  private lastCollisionCount = 0;
+  private overlayEnabled = false;
+  private editorMode = false;
+  private selectedSphereId: string | null = null;
+  private createdSphereCount = 0;
+  private disposed = false;
+
+  constructor(private readonly mountNode: HTMLDivElement) {
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.mountNode.appendChild(this.renderer.domElement);
+
+    this.hudNode = document.createElement("div");
+    this.hudNode.className = "hud";
+    this.mountNode.appendChild(this.hudNode);
+
+    this.hintNode = document.createElement("div");
+    this.hintNode.className = "center-hint";
+    this.mountNode.appendChild(this.hintNode);
+
+    this.crosshairNode = document.createElement("div");
+    this.crosshairNode.className = "crosshair";
+    this.mountNode.appendChild(this.crosshairNode);
+
+    this.controller = new FpsController(this.renderer.domElement);
+
+    this.setupScene();
+    this.updateHintText();
+    this.recolorObstacles();
+
+    window.addEventListener("resize", this.onResize);
+    document.addEventListener("pointerlockchange", this.onPointerLockChange);
+    document.addEventListener("keydown", this.onKeyDown);
+  }
+
+  start(): void {
+    this.controller.connect();
+    this.renderer.setAnimationLoop(this.animate);
+    this.onResize();
+  }
+
+  dispose(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
+    this.controller.disconnect();
+    this.renderer.setAnimationLoop(null);
+    window.removeEventListener("resize", this.onResize);
+    document.removeEventListener("pointerlockchange", this.onPointerLockChange);
+    document.removeEventListener("keydown", this.onKeyDown);
+    this.renderer.dispose();
+  }
+
+  private setupScene(): void {
+    this.scene.background = new THREE.Color(0x090d15);
+    this.scene.fog = new THREE.FogExp2(0x090d15, 0.0175);
+
+    const ambientLight = new THREE.AmbientLight(0x9cbefc, 0.35);
+    this.scene.add(ambientLight);
+
+    const keyLight = new THREE.DirectionalLight(0xbad7ff, 1.0);
+    keyLight.position.set(20, 45, 15);
+    this.scene.add(keyLight);
+
+    const rimLight = new THREE.DirectionalLight(0x7eb1ff, 0.3);
+    rimLight.position.set(-24, 18, -12);
+    this.scene.add(rimLight);
+
+    const parentGeometry = new THREE.SphereGeometry(this.parentSphere.radius, 48, 32);
+    const parentMaterial = new THREE.MeshStandardMaterial({
+      color: 0x2d3f58,
+      roughness: 0.92,
+      metalness: 0.05,
+      side: THREE.BackSide,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.22,
+    });
+
+    const parentMesh = new THREE.Mesh(parentGeometry, parentMaterial);
+    parentMesh.position.copy(this.parentCenter);
+    this.scene.add(parentMesh);
+    this.worldMeshes.set(this.parentSphere.id, parentMesh);
+
+    for (const obstacle of this.obstacles) {
+      this.addObstacleMesh(obstacle);
+    }
+  }
+
+  private buildObstacleBodies(entities: SphereEntity[]): ObstacleBody[] {
+    return entities.map((entity) => ({
+      id: entity.id,
+      center: new THREE.Vector3(entity.position3d[0], entity.position3d[1], entity.position3d[2]),
+      radius: entity.radius,
+      money: entity.dimensions.money ?? 0,
+    }));
+  }
+
+  private readonly onResize = (): void => {
+    this.camera.aspect = window.innerWidth / window.innerHeight;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+  };
+
+  private readonly onPointerLockChange = (): void => {
+    if (this.controller.isPointerLocked()) {
+      this.hintNode.style.opacity = "0";
+      return;
+    }
+    this.hintNode.style.opacity = "1";
+  };
+
+  private readonly onKeyDown = (event: KeyboardEvent): void => {
+    if (event.repeat) {
+      return;
+    }
+
+    if (matchesKeyBinding(event, KEYBINDINGS.toggleOverlay)) {
+      event.preventDefault();
+      this.overlayEnabled = !this.overlayEnabled;
+      this.recolorObstacles();
+      return;
+    }
+
+    if (matchesKeyBinding(event, KEYBINDINGS.toggleEditorMode)) {
+      event.preventDefault();
+      this.toggleEditorMode();
+      return;
+    }
+
+    if (!this.editorMode) {
+      return;
+    }
+
+    if (matchesKeyBinding(event, KEYBINDINGS.createSphere)) {
+      event.preventDefault();
+      this.createSphereInFrontOfPlayer();
+      return;
+    }
+
+    if (matchesKeyBinding(event, KEYBINDINGS.deselectSphere)) {
+      event.preventDefault();
+      this.selectedSphereId = null;
+      this.recolorObstacles();
+      return;
+    }
+
+    if (matchesKeyBinding(event, KEYBINDINGS.selectLookedAtSphere)) {
+      event.preventDefault();
+      this.selectSphereAtReticle();
+      return;
+    }
+
+    if (matchesKeyBinding(event, KEYBINDINGS.deleteSelectedSphere)) {
+      event.preventDefault();
+      this.deleteSelectedSphere();
+    }
+  };
+
+  private readonly animate = (): void => {
+    const frameSeconds = Math.min(this.clock.getDelta(), 0.05);
+    this.accumulatorSeconds += frameSeconds;
+
+    while (this.accumulatorSeconds >= FIXED_STEP_SECONDS) {
+      this.updateFixed(FIXED_STEP_SECONDS);
+      this.accumulatorSeconds -= FIXED_STEP_SECONDS;
+    }
+
+    this.syncCamera();
+    this.updateHud();
+    this.renderer.render(this.scene, this.camera);
+  };
+
+  private updateFixed(dt: number): void {
+    this.tick += 1;
+    const input = this.controller.sampleInput();
+    const orientation = this.controller.getOrientation();
+
+    const moveDirection = new THREE.Vector3();
+    if (input.forward !== 0 || input.right !== 0) {
+      const forward = new THREE.Vector3(Math.sin(orientation.yaw), 0, Math.cos(orientation.yaw));
+      const right = new THREE.Vector3(forward.z, 0, -forward.x);
+      moveDirection
+        .addScaledVector(forward, -input.forward)
+        .addScaledVector(right, input.right)
+        .normalize();
+    }
+
+    if (this.player.grounded) {
+      this.player.velocity.x = moveDirection.x * MOVE_SPEED;
+      this.player.velocity.z = moveDirection.z * MOVE_SPEED;
+      this.player.velocity.multiplyScalar(1 / (1 + DRAG_GROUNDED * dt));
+      if (input.jump) {
+        this.player.velocity.y = JUMP_SPEED;
+        this.player.grounded = false;
+      }
+    } else {
+      const targetX = moveDirection.x * MOVE_SPEED;
+      const targetZ = moveDirection.z * MOVE_SPEED;
+      this.player.velocity.x += (targetX - this.player.velocity.x) * AIR_CONTROL * dt;
+      this.player.velocity.z += (targetZ - this.player.velocity.z) * AIR_CONTROL * dt;
+      this.player.velocity.multiplyScalar(1 / (1 + DRAG_AIR * dt));
+    }
+
+    this.player.velocity.y -= GRAVITY * dt;
+    this.player.position.addScaledVector(this.player.velocity, dt);
+
+    this.lastCollisionCount = resolveSphereCollisions(this.player, this.obstacles);
+    constrainInsideParentSphere(this.player, this.parentCenter, this.parentSphere.radius);
+  }
+
+  private syncCamera(): void {
+    const orientation = this.controller.getOrientation();
+    this.camera.rotation.order = "YXZ";
+    this.camera.rotation.y = orientation.yaw;
+    this.camera.rotation.x = orientation.pitch;
+    this.camera.position.copy(this.player.position);
+  }
+
+  private recolorObstacles(): void {
+    for (const obstacle of this.obstacles) {
+      const obstacleMesh = this.obstacleMeshes.get(obstacle.id);
+      if (!obstacleMesh || !(obstacleMesh.material instanceof THREE.MeshStandardMaterial)) {
+        continue;
+      }
+
+      const baseColor = new THREE.Color(0x78849b);
+      const overlayColor = new THREE.Color(0x2f7aff);
+      const blend = this.overlayEnabled ? Math.max(0, Math.min(1, obstacle.money)) : 0;
+      obstacleMesh.material.color.copy(baseColor).lerp(overlayColor, blend);
+      obstacleMesh.material.emissive.setHex(0x000000).lerp(new THREE.Color(0x103a8f), blend * 0.35);
+
+      const selected = obstacle.id === this.selectedSphereId;
+      if (selected) {
+        obstacleMesh.material.emissive.lerp(new THREE.Color(0xffae42), 0.75);
+        obstacleMesh.material.roughness = 0.45;
+        obstacleMesh.material.metalness = 0.24;
+      } else {
+        obstacleMesh.material.roughness = 0.75;
+        obstacleMesh.material.metalness = 0.08;
+      }
+
+      obstacleMesh.material.needsUpdate = true;
+    }
+  }
+
+  private toggleEditorMode(): void {
+    this.editorMode = !this.editorMode;
+    if (!this.editorMode) {
+      this.selectedSphereId = null;
+      this.recolorObstacles();
+    }
+    this.updateHintText();
+  }
+
+  private addObstacleMesh(obstacle: ObstacleBody): void {
+    const sphereGeometry = new THREE.SphereGeometry(obstacle.radius, 24, 18);
+    const sphereMaterial = new THREE.MeshStandardMaterial({
+      color: 0x7082a1,
+      roughness: 0.75,
+      metalness: 0.08,
+    });
+    const obstacleMesh = new THREE.Mesh(sphereGeometry, sphereMaterial);
+    obstacleMesh.position.copy(obstacle.center);
+    obstacleMesh.userData.sphereId = obstacle.id;
+    this.scene.add(obstacleMesh);
+    this.worldMeshes.set(obstacle.id, obstacleMesh);
+    this.obstacleMeshes.set(obstacle.id, obstacleMesh);
+  }
+
+  private createSphereInFrontOfPlayer(): void {
+    this.createdSphereCount += 1;
+    const id = `sphere-user-${String(this.createdSphereCount).padStart(3, "0")}`;
+    this.camera.getWorldDirection(tempForward);
+
+    const center = this.player.position
+      .clone()
+      .addScaledVector(tempForward.normalize(), CREATE_DISTANCE);
+
+    tempOffset.copy(center).sub(this.parentCenter);
+    const distanceFromCenter = tempOffset.length();
+    const maxDistance = this.parentSphere.radius - CREATED_SPHERE_RADIUS - CREATE_BOUNDARY_MARGIN;
+    if (distanceFromCenter > maxDistance) {
+      if (distanceFromCenter > 1e-6) {
+        center.copy(this.parentCenter).addScaledVector(tempOffset.normalize(), maxDistance);
+      } else {
+        center.copy(this.parentCenter).add(new THREE.Vector3(0, 0, maxDistance));
+      }
+    }
+
+    const obstacle: ObstacleBody = {
+      id,
+      center,
+      radius: CREATED_SPHERE_RADIUS,
+      money: Math.random(),
+    };
+
+    this.obstacles.push(obstacle);
+    this.addObstacleMesh(obstacle);
+    this.selectedSphereId = id;
+    this.recolorObstacles();
+  }
+
+  private selectSphereAtReticle(): void {
+    const meshes = [...this.obstacleMeshes.values()];
+    if (meshes.length === 0) {
+      this.selectedSphereId = null;
+      this.recolorObstacles();
+      return;
+    }
+
+    this.raycaster.setFromCamera(tempRaycastPoint, this.camera);
+    const intersections = this.raycaster.intersectObjects(meshes, false);
+    if (intersections.length === 0) {
+      return;
+    }
+
+    const firstObject = intersections[0].object as THREE.Mesh;
+    const selectedId = firstObject.userData.sphereId;
+    if (typeof selectedId === "string") {
+      this.selectedSphereId = selectedId;
+      this.recolorObstacles();
+    }
+  }
+
+  private deleteSelectedSphere(): void {
+    if (this.selectedSphereId === null) {
+      return;
+    }
+
+    const selectedId = this.selectedSphereId;
+    this.selectedSphereId = null;
+    this.obstacles = this.obstacles.filter((obstacle) => obstacle.id !== selectedId);
+
+    const selectedMesh = this.obstacleMeshes.get(selectedId);
+    if (selectedMesh) {
+      this.scene.remove(selectedMesh);
+
+      if (selectedMesh.geometry) {
+        selectedMesh.geometry.dispose();
+      }
+
+      if (Array.isArray(selectedMesh.material)) {
+        for (const material of selectedMesh.material) {
+          material.dispose();
+        }
+      } else {
+        selectedMesh.material.dispose();
+      }
+    }
+
+    this.obstacleMeshes.delete(selectedId);
+    this.worldMeshes.delete(selectedId);
+    this.recolorObstacles();
+  }
+
+  private updateHintText(): void {
+    if (this.editorMode) {
+      this.hintNode.textContent =
+        "EDIT MODE | ~ exit | C create | E select looked-at | Q deselect | Z delete selected";
+      return;
+    }
+
+    this.hintNode.textContent =
+      "Click to lock pointer | WASD + Space | O overlay | ~ editor mode";
+  }
+
+  private updateHud(): void {
+    this.hudNode.textContent =
+      `tick: ${this.tick}\n` +
+      `position: ${this.player.position.x.toFixed(2)}, ${this.player.position.y.toFixed(2)}, ${this.player.position.z.toFixed(2)}\n` +
+      `velocity: ${this.player.velocity.x.toFixed(2)}, ${this.player.velocity.y.toFixed(2)}, ${this.player.velocity.z.toFixed(2)}\n` +
+      `grounded: ${this.player.grounded ? "yes" : "no"}\n` +
+      `collisions: ${this.lastCollisionCount}\n` +
+      `overlay: ${this.overlayEnabled ? "money (blue)" : "off"}\n` +
+      `editor: ${this.editorMode ? "on" : "off"}\n` +
+      `selected: ${this.selectedSphereId ?? "none"}\n` +
+      `spheres: ${this.obstacles.length}`;
+  }
+}

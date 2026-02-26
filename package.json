@@ -1,0 +1,17 @@
+{
+  "name": "fpsphere",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:frontend": "npm --workspace frontend run dev",
+    "build:shared": "npm --workspace @fpsphere/shared-types run build",
+    "typecheck:shared": "npm --workspace @fpsphere/shared-types run typecheck",
+    "build:frontend": "npm --workspace frontend run build",
+    "typecheck:frontend": "npm --workspace frontend run typecheck",
+    "check": "npm run typecheck:shared && npm run typecheck:frontend"
+  }
+}
