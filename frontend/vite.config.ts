@@ -12,5 +12,6 @@ export default defineConfig({
         ws: true,
       },
     },
+    allowedHosts: ["localhost", "poultry-sparc-nottingham-loved.trycloudflare.com"],
   },
 });

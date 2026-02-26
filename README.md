@@ -46,6 +46,15 @@ Initial implementation scaffold for:
 10. Sphere world navigation:
    - `F` in editor mode enters the template world of the selected sphere (`world_template > 0`).
    - `F` with no selected sphere exits back to the parent world.
+11. QR marker printer:
+   - Open `http://localhost:5173/?mode=qr`.
+   - Pick a `world_id`, optional AR world scale multiplier, then print at 100% scale.
+12. Mobile AR marker viewer:
+   - Open `http://localhost:5173/?mode=ar` on a phone browser (uses native `BarcodeDetector` when available, otherwise JS fallback).
+   - Grant camera access and point at the printed marker to anchor the FPSphere world on top of the live camera view.
+   - AR mode now renders the same world snapshot/model pipeline as FPS mode and also displays live remote multiplayer players.
+   - For phone camera access, run on a secure origin (`https://`) or localhost-equivalent.
+   - On iOS browsers (Chrome/Safari WebKit), native `BarcodeDetector` may be missing; the app now falls back to a JS `jsQR` decoder loaded at runtime.
 
 ### Backend
 
