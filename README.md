@@ -28,6 +28,9 @@ Initial implementation scaffold for:
 4. World data source:
    - Frontend requests `/api/v1/world/world-main` via Vite proxy to `http://127.0.0.1:4000`.
    - If backend is not running, client falls back to local seed data.
+5. Save edits:
+   - Press `Cmd+S` (macOS) or `Ctrl+S` (Windows/Linux) to commit local edits.
+   - Backend saves to `master` when possible, otherwise falls back to a per-user branch.
 
 ### Backend
 
@@ -37,6 +40,8 @@ Initial implementation scaffold for:
    - `http://127.0.0.1:4000/healthz`
 3. Example world snapshot:
    - `http://127.0.0.1:4000/api/v1/world/world-main`
+4. Commit endpoint:
+   - `POST http://127.0.0.1:4000/api/v1/world/world-main/commit`
 
 ## Current milestone status
 

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchWorldSeed } from "../src/game/worldApi";
+import {
+  commitWorldChanges,
+  fetchWorldSeed,
+  WorldCommitError,
+  type WorldCommitOperation,
+} from "../src/game/worldApi";
 
 const originalFetch = globalThis.fetch;
 
@@ -8,11 +13,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("fetchWorldSeed", () => {
-  it("maps backend snapshot schema to seed world", async () => {
+describe("worldApi", () => {
+  it("maps backend snapshot schema to loaded world", async () => {
     const payload = {
       world_id: "world-main",
-      tick: 0,
+      tick: 12,
       entities: [
         {
           id: "sphere-world-001",
@@ -42,21 +47,118 @@ describe("fetchWorldSeed", () => {
       });
     }) as typeof globalThis.fetch;
 
-    const world = await fetchWorldSeed("world-main");
+    const loaded = await fetchWorldSeed("world-main", "user-1");
 
-    expect(world.parent.id).toBe("sphere-world-001");
-    expect(world.children).toHaveLength(1);
-    expect(world.children[0].id).toBe("sphere-building-001");
-    expect(world.children[0].position3d).toEqual([1, 2, 3]);
+    expect(loaded.tick).toBe(12);
+    expect(loaded.world.parent.id).toBe("sphere-world-001");
+    expect(loaded.world.children).toHaveLength(1);
+    expect(loaded.world.children[0].id).toBe("sphere-building-001");
+    expect(loaded.world.children[0].position3d).toEqual([1, 2, 3]);
   });
 
-  it("throws on non-OK backend response", async () => {
+  it("sends commit payload and maps commit response", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.user_id).toBe("user-1");
+      expect(body.base_tick).toBe(4);
+      expect(body.operations).toHaveLength(2);
+      expect(body.operations[0].type).toBe("create");
+      expect(body.operations[1].type).toBe("delete");
+
+      const responsePayload = {
+        commit_id: "master-7",
+        saved_to: "master",
+        reason: null,
+        master_tick: 5,
+        user_tick: null,
+        validation_errors: [],
+        world: {
+          world_id: "world-main",
+          tick: 5,
+          entities: [
+            {
+              id: "sphere-world-001",
+              parent_id: null,
+              radius: 60,
+              position_3d: [0, 0, 0],
+              dimensions: { money: 0 },
+              time_window: { start_tick: 0, end_tick: null },
+              tags: ["world"],
+            },
+            {
+              id: "sphere-keep-001",
+              parent_id: "sphere-world-001",
+              radius: 3,
+              position_3d: [1, 1, 1],
+              dimensions: { money: 0.3 },
+              time_window: { start_tick: 0, end_tick: null },
+              tags: ["object"],
+            },
+          ],
+        },
+      };
+
+      return new Response(JSON.stringify(responsePayload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    globalThis.fetch = fetchMock as typeof globalThis.fetch;
+
+    const operations: WorldCommitOperation[] = [
+      {
+        type: "create",
+        sphere: {
+          id: "sphere-created-001",
+          parentId: "sphere-world-001",
+          radius: 2,
+          position3d: [2, 2, 2],
+          dimensions: { money: 0.1 },
+          timeWindow: { start: 0, end: null },
+          tags: ["new"],
+        },
+      },
+      {
+        type: "delete",
+        sphereId: "sphere-old-001",
+      },
+    ];
+
+    const result = await commitWorldChanges({
+      worldId: "world-main",
+      userId: "user-1",
+      baseTick: 4,
+      operations,
+    });
+
+    expect(result.savedTo).toBe("master");
+    expect(result.tick).toBe(5);
+    expect(result.world.children).toHaveLength(1);
+  });
+
+  it("throws typed commit error when backend rejects commit", async () => {
     globalThis.fetch = vi.fn(async () => {
-      return new Response(null, { status: 500, statusText: "Server Error" });
+      return new Response(
+        JSON.stringify({
+          status: "error",
+          message: "commit rejected",
+          validation_errors: ["delete failed: sphere 'x' does not exist"],
+        }),
+        {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     }) as typeof globalThis.fetch;
 
-    await expect(fetchWorldSeed("world-main")).rejects.toThrow(
-      "Failed to fetch world snapshot",
-    );
+    await expect(
+      commitWorldChanges({
+        worldId: "world-main",
+        userId: "user-1",
+        baseTick: 4,
+        operations: [],
+      }),
+    ).rejects.toBeInstanceOf(WorldCommitError);
   });
 });

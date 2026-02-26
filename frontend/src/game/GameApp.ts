@@ -9,7 +9,12 @@ import {
 } from "./physics";
 import { KEYBINDINGS, matchesKeyBinding } from "./keybindings";
 import { buildSeedWorld } from "./worldSeed";
-import { fetchWorldSeed } from "./worldApi";
+import {
+  commitWorldChanges,
+  fetchWorldSeed,
+  type WorldCommitOperation,
+  WorldCommitError,
+} from "./worldApi";
 import { LocalWorldStore, type WorldStoreSnapshot } from "./worldStore";
 
 const FIXED_STEP_SECONDS = 1 / 60;
@@ -23,6 +28,7 @@ const DRAG_AIR = 0.8;
 const CREATED_SPHERE_RADIUS = 2.4;
 const CREATE_DISTANCE = 8;
 const CREATE_BOUNDARY_MARGIN = 0.35;
+const WORLD_ID = "world-main";
 
 const tempForward = new THREE.Vector3();
 const tempOffset = new THREE.Vector3();
@@ -66,7 +72,12 @@ export class GameApp {
   private overlayEnabled = false;
   private editorMode = false;
   private createdSphereCount = 0;
-  private worldSourceState: "seed" | "loading" | "backend" = "loading";
+  private pendingCommitOperations: WorldCommitOperation[] = [];
+  private saveInFlight = false;
+  private saveMessage = "no pending edits";
+  private backendWorldTick = 0;
+  private readonly userId = this.getOrCreateUserId();
+  private worldSourceState: "seed" | "loading" | "backend" | "backend-user" = "loading";
   private disposed = false;
 
   constructor(private readonly mountNode: HTMLDivElement) {
@@ -92,7 +103,7 @@ export class GameApp {
     this.unsubscribeWorldStore = this.worldStore.subscribe(this.onWorldStoreChanged);
     this.updateHintText();
     this.recolorObstacles();
-    void this.loadWorldFromBackend("world-main");
+    void this.loadWorldFromBackend(WORLD_ID);
 
     window.addEventListener("resize", this.onResize);
     document.addEventListener("pointerlockchange", this.onPointerLockChange);
@@ -182,20 +193,104 @@ export class GameApp {
     this.worldSourceState = "loading";
 
     try {
-      const world = await fetchWorldSeed(worldId);
+      const loadedWorld = await fetchWorldSeed(worldId, this.userId);
       if (this.disposed) {
         return;
       }
 
       const hydrated = this.worldStore.apply({
         type: "hydrateWorld",
-        world,
+        world: loadedWorld.world,
       });
 
+      this.backendWorldTick = loadedWorld.tick;
+      this.pendingCommitOperations = [];
+      this.refreshPendingSaveMessage();
       this.worldSourceState = hydrated ? "backend" : "seed";
     } catch (error) {
       this.worldSourceState = "seed";
       console.warn("Failed to load world from backend, using local seed world", error);
+    }
+  }
+
+  private refreshPendingSaveMessage(): void {
+    if (this.saveInFlight) {
+      return;
+    }
+
+    if (this.pendingCommitOperations.length === 0) {
+      this.saveMessage = "no pending edits";
+      return;
+    }
+
+    this.saveMessage = `pending edits: ${this.pendingCommitOperations.length}`;
+  }
+
+  private async saveWorldCommit(): Promise<void> {
+    if (this.saveInFlight) {
+      return;
+    }
+
+    if (this.pendingCommitOperations.length === 0) {
+      this.saveMessage = "no pending edits";
+      return;
+    }
+
+    this.saveInFlight = true;
+    this.saveMessage = `saving ${this.pendingCommitOperations.length} edit(s)...`;
+
+    try {
+      const response = await commitWorldChanges({
+        worldId: WORLD_ID,
+        userId: this.userId,
+        baseTick: this.backendWorldTick,
+        operations: this.pendingCommitOperations,
+      });
+
+      this.worldStore.apply({
+        type: "hydrateWorld",
+        world: response.world,
+      });
+
+      this.backendWorldTick = response.tick;
+      this.pendingCommitOperations = [];
+      this.worldSourceState = response.savedTo === "master" ? "backend" : "backend-user";
+      const reasonSuffix = response.reason ? ` (${response.reason})` : "";
+      this.saveMessage = `saved ${response.commitId} -> ${response.savedTo}${reasonSuffix}`;
+    } catch (error) {
+      if (error instanceof WorldCommitError) {
+        if (error.validationErrors.length > 0) {
+          this.saveMessage = `save failed: ${error.validationErrors[0]}`;
+        } else {
+          this.saveMessage = `save failed: ${error.message}`;
+        }
+      } else if (error instanceof Error) {
+        this.saveMessage = `save failed: ${error.message}`;
+      } else {
+        this.saveMessage = "save failed: unknown error";
+      }
+    } finally {
+      this.saveInFlight = false;
+    }
+  }
+
+  private getOrCreateUserId(): string {
+    const storageKey = "fpsphere.user_id";
+
+    try {
+      const existing = window.localStorage.getItem(storageKey);
+      if (existing && existing.length > 0) {
+        return existing;
+      }
+
+      const generated =
+        typeof window.crypto?.randomUUID === "function"
+          ? window.crypto.randomUUID()
+          : `user-${Math.random().toString(36).slice(2, 10)}`;
+      window.localStorage.setItem(storageKey, generated);
+      return generated;
+    } catch {
+      return "user-local-fallback";
     }
   }
 
@@ -285,6 +380,12 @@ export class GameApp {
   };
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      void this.saveWorldCommit();
+      return;
+    }
+
     if (event.repeat) {
       return;
     }
@@ -447,24 +548,34 @@ export class GameApp {
       }
     }
 
-    this.worldStore.apply({
+    const sphere: SphereEntity = {
+      id,
+      parentId: this.parentSphere.id,
+      radius: CREATED_SPHERE_RADIUS,
+      position3d: [center.x, center.y, center.z],
+      dimensions: {
+        money: Math.random(),
+      },
+      timeWindow: {
+        start: this.tick,
+        end: null,
+      },
+      tags: ["user-created"],
+    };
+
+    const changed = this.worldStore.apply({
       type: "createSphere",
       selectCreated: true,
-      sphere: {
-        id,
-        parentId: this.parentSphere.id,
-        radius: CREATED_SPHERE_RADIUS,
-        position3d: [center.x, center.y, center.z],
-        dimensions: {
-          money: Math.random(),
-        },
-        timeWindow: {
-          start: this.tick,
-          end: null,
-        },
-        tags: ["user-created"],
-      },
+      sphere,
     });
+
+    if (changed) {
+      this.pendingCommitOperations.push({
+        type: "create",
+        sphere,
+      });
+      this.refreshPendingSaveMessage();
+    }
   }
 
   private selectSphereAtReticle(): void {
@@ -496,10 +607,18 @@ export class GameApp {
       return;
     }
 
-    this.worldStore.apply({
+    const changed = this.worldStore.apply({
       type: "deleteSphere",
       sphereId: selectedId,
     });
+
+    if (changed) {
+      this.pendingCommitOperations.push({
+        type: "delete",
+        sphereId: selectedId,
+      });
+      this.refreshPendingSaveMessage();
+    }
   }
 
   private updateHintText(): void {
@@ -510,7 +629,7 @@ export class GameApp {
     }
 
     this.hintNode.textContent =
-      "Click to lock pointer | WASD + Space | O overlay | ~ editor mode";
+      "Click to lock pointer | WASD + Space | O overlay | ~ editor mode | Cmd/Ctrl+S save";
   }
 
   private updateHud(): void {
@@ -526,6 +645,10 @@ export class GameApp {
       `editor: ${this.editorMode ? "on" : "off"}\n` +
       `selected: ${selectedSphereId ?? "none"}\n` +
       `spheres: ${this.obstacles.length}\n` +
-      `world source: ${this.worldSourceState}`;
+      `world source: ${this.worldSourceState}\n` +
+      `world tick: ${this.backendWorldTick}\n` +
+      `pending edits: ${this.pendingCommitOperations.length}\n` +
+      `save: ${this.saveMessage}\n` +
+      `user: ${this.userId}`;
   }
 }

@@ -339,6 +339,8 @@ Then merge for integration sprint:
 - [x] Implement local collision loop for player vs world spheres.
 - [x] Add overlay toggle for `money` dimension.
 - [x] Connect frontend world loading to backend snapshot endpoint.
+- [x] Add backend commit endpoint with master/user branch fallback.
+- [x] Add frontend save shortcut (`Cmd/Ctrl+S`) for commit submission.
 - [x] Implement editor mode toggle with `~`.
 - [x] Implement edit shortcuts in editor mode: `C`, `Q`, `E`, `Z`.
 - [x] Add layout-aware keybinding tests for Dvorak and QWERTY.
