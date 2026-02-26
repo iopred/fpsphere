@@ -1549,9 +1549,22 @@ export class GameApp {
     this.updateTemplateHud();
   }
 
+  private nextCreatedSphereId(): string {
+    const userPrefix = this.userId.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 12) || "local";
+
+    for (let attempt = 0; attempt < 256; attempt += 1) {
+      this.createdSphereCount += 1;
+      const id = `sphere-user-${userPrefix}-${String(this.createdSphereCount).padStart(4, "0")}`;
+      if (!this.worldStore.getSphereById(id)) {
+        return id;
+      }
+    }
+
+    return `sphere-user-${userPrefix}-${Date.now().toString(36)}`;
+  }
+
   private createSphereInFrontOfPlayer(): void {
-    this.createdSphereCount += 1;
-    const id = `sphere-user-${String(this.createdSphereCount).padStart(3, "0")}`;
+    const id = this.nextCreatedSphereId();
     this.camera.getWorldDirection(tempForward);
 
     const createdSphereRadius = Number(
