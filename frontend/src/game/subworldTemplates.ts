@@ -60,8 +60,23 @@ export function getTemplateRootSphereId(templateId: number): string {
   return `sphere-template-root-${templateId}`;
 }
 
+export function resolveTemplateSeedId(templateId: number): number | null {
+  const exact = SUBWORLD_TEMPLATES[templateId];
+  if (exact) {
+    return exact.id;
+  }
+
+  const available = getAvailableSubworldTemplateIds();
+  if (available.length === 0) {
+    return null;
+  }
+
+  return available[0];
+}
+
 export function getTemplateRootRadius(templateId: number): number {
-  const template = SUBWORLD_TEMPLATES[templateId];
+  const resolvedTemplateId = resolveTemplateSeedId(templateId);
+  const template = resolvedTemplateId === null ? null : SUBWORLD_TEMPLATES[resolvedTemplateId];
   if (template && Number.isFinite(template.rootRadius) && template.rootRadius > 0) {
     return template.rootRadius;
   }
@@ -103,12 +118,17 @@ export function instantiateSubworldChildren(hostSpheres: SphereEntity[]): Sphere
   const derived: SphereEntity[] = [];
 
   for (const host of hostSpheres) {
-    const templateId = resolveTemplateId(host);
-    if (templateId === null) {
+    const requestedTemplateId = resolveTemplateId(host);
+    if (requestedTemplateId === null) {
       continue;
     }
 
-    const template = SUBWORLD_TEMPLATES[templateId];
+    const seedTemplateId = resolveTemplateSeedId(requestedTemplateId);
+    if (seedTemplateId === null) {
+      continue;
+    }
+
+    const template = SUBWORLD_TEMPLATES[seedTemplateId];
     if (!template) {
       continue;
     }
@@ -120,7 +140,7 @@ export function instantiateSubworldChildren(hostSpheres: SphereEntity[]): Sphere
 
     for (const child of template.children) {
       derived.push({
-        id: `${host.id}::template-${template.id}::${child.id}`,
+        id: `${host.id}::template-${requestedTemplateId}::${child.id}`,
         parentId: host.id,
         radius: Math.max(0.05, child.radius * scale),
         position3d: [
@@ -130,7 +150,7 @@ export function instantiateSubworldChildren(hostSpheres: SphereEntity[]): Sphere
         ],
         dimensions: { ...child.dimensions },
         timeWindow: { ...host.timeWindow },
-        tags: [...child.tags, "instanced-subworld", `template-${template.id}`],
+        tags: [...child.tags, "instanced-subworld", `template-${requestedTemplateId}`],
       });
     }
   }

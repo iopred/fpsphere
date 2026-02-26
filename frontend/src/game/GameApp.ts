@@ -13,6 +13,7 @@ import {
   getTemplateRootRadius,
   getTemplateRootSphereId,
   instantiateSubworldChildren,
+  resolveTemplateSeedId,
   TEMPLATE_DEFINITION_TAG,
   TEMPLATE_ROOT_TAG,
   SUBWORLD_SCALE_DIMENSION,
@@ -134,6 +135,7 @@ export class GameApp {
 
     this.hudNode = document.createElement("div");
     this.hudNode.className = "hud";
+    this.hudNode.hidden = true;
     this.mountNode.appendChild(this.hudNode);
 
     this.hintNode = document.createElement("div");
@@ -593,6 +595,15 @@ export class GameApp {
     return this.worldStore.getSphereById(getTemplateRootSphereId(templateId));
   }
 
+  private hasSharedTemplateDefinition(templateId: number): boolean {
+    const templateRoot = this.getTemplateRootSphere(templateId);
+    if (!templateRoot) {
+      return false;
+    }
+
+    return this.worldStore.listChildrenOf(templateRoot.id).length > 0;
+  }
+
   private resolveTemplateHostScale(hostSphere: SphereEntity, templateRootRadius: number): number {
     if (!Number.isFinite(templateRootRadius) || templateRootRadius <= 0) {
       return 0;
@@ -674,17 +685,28 @@ export class GameApp {
           dimensions: { ...legacyChild.dimensions },
           timeWindow: { ...legacyChild.timeWindow },
           tags: [
-            ...legacyChild.tags.filter((tag) => tag !== "instanced-subworld" && tag !== TEMPLATE_ROOT_TAG),
+            ...legacyChild.tags.filter(
+              (tag) =>
+                tag !== "instanced-subworld" &&
+                tag !== TEMPLATE_ROOT_TAG &&
+                !tag.startsWith("template-"),
+            ),
             TEMPLATE_DEFINITION_TAG,
           ],
         });
       }
     } else {
+      const sourceTemplateId = this.readTemplateId(sourceHost);
+      const seedTemplateId = resolveTemplateSeedId(sourceTemplateId);
+      if (seedTemplateId === null) {
+        return;
+      }
+
       const seedHost: SphereEntity = {
         ...templateRoot,
         dimensions: {
           ...templateRoot.dimensions,
-          [SUBWORLD_TEMPLATE_DIMENSION]: this.readTemplateId(sourceHost),
+          [SUBWORLD_TEMPLATE_DIMENSION]: seedTemplateId,
           [SUBWORLD_SCALE_DIMENSION]: 1,
         },
       };
@@ -692,7 +714,9 @@ export class GameApp {
         nextChildren.push({
           ...child,
           tags: [
-            ...child.tags.filter((tag) => tag !== "instanced-subworld"),
+            ...child.tags.filter(
+              (tag) => tag !== "instanced-subworld" && !tag.startsWith("template-"),
+            ),
             TEMPLATE_DEFINITION_TAG,
           ],
         });
@@ -1001,7 +1025,7 @@ export class GameApp {
 
     for (const child of visibleChildren) {
       const templateId = this.readTemplateId(child);
-      if (templateId > TEMPLATE_NONE_ID && this.getTemplateRootSphere(templateId)) {
+      if (templateId > TEMPLATE_NONE_ID && this.hasSharedTemplateDefinition(templateId)) {
         continue;
       }
       for (const descendant of this.worldStore.listDescendantsOf(child.id)) {
@@ -1015,7 +1039,7 @@ export class GameApp {
 
     const fallbackTemplateHosts = templateHosts.filter((host) => {
       const templateId = this.readTemplateId(host);
-      return templateId > TEMPLATE_NONE_ID && !this.getTemplateRootSphere(templateId);
+      return templateId > TEMPLATE_NONE_ID && !this.hasSharedTemplateDefinition(templateId);
     });
 
     for (const instancedChild of instantiateSubworldChildren(fallbackTemplateHosts)) {
@@ -1712,6 +1736,11 @@ export class GameApp {
   }
 
   private updateHud(): void {
+    this.hudNode.hidden = !this.editorMode;
+    if (!this.editorMode) {
+      return;
+    }
+
     const selectedSphereId = this.worldStore.getSelectedSphereId();
 
     this.hudNode.textContent =

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SphereEntity } from "@fpsphere/shared-types";
 import {
   instantiateSubworldChildren,
+  resolveTemplateSeedId,
   SUBWORLD_SCALE_DIMENSION,
   SUBWORLD_TEMPLATE_DIMENSION,
 } from "../src/game/subworldTemplates";
@@ -38,7 +39,7 @@ describe("subworldTemplates", () => {
     expect(ground?.tags.includes("instanced-subworld")).toBe(true);
   });
 
-  it("applies optional world_scale and ignores unknown templates", () => {
+  it("applies optional world_scale and falls back unknown templates to default seed", () => {
     const scaled = instantiateSubworldChildren([
       hostSphere({
         id: "host-scale",
@@ -59,6 +60,12 @@ describe("subworldTemplates", () => {
 
     const scaledGround = scaled.find((item) => item.id.includes("host-scale"));
     expect(scaledGround?.radius).toBeCloseTo(10.4);
-    expect(scaled.every((item) => !item.id.includes("host-unknown"))).toBe(true);
+    expect(scaled.some((item) => item.id.includes("host-unknown"))).toBe(true);
+    expect(scaled.some((item) => item.tags.includes("template-999"))).toBe(true);
+  });
+
+  it("resolves seed template id to default static template for unknown ids", () => {
+    expect(resolveTemplateSeedId(1)).toBe(1);
+    expect(resolveTemplateSeedId(999)).toBe(1);
   });
 });
