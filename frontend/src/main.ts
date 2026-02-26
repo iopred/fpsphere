@@ -1,7 +1,4 @@
 import "./style.css";
-import { GameApp } from "./game/GameApp";
-import { FpsphereArApp } from "./ar/FpsphereArApp";
-import { FpsphereQrPrintApp } from "./ar/FpsphereQrPrintApp";
 
 interface StartableApp {
   start(): void;
@@ -12,18 +9,27 @@ const mountNode = document.querySelector<HTMLDivElement>("#app");
 if (!mountNode) {
   throw new Error("Unable to find #app mount node");
 }
+const appMountNode: HTMLDivElement = mountNode;
 
 const searchParams = new URLSearchParams(window.location.search);
 const mode = (searchParams.get("mode") ?? "").toLowerCase();
 
-let app: StartableApp;
-if (mode === "ar") {
-  app = new FpsphereArApp(mountNode);
-} else if (mode === "qr") {
-  app = new FpsphereQrPrintApp(mountNode);
-} else {
-  app = new GameApp(mountNode);
+async function createApp(modeValue: string): Promise<StartableApp> {
+  if (modeValue === "ar") {
+    const { FpsphereArApp } = await import("./ar/FpsphereArApp");
+    return new FpsphereArApp(appMountNode);
+  }
+
+  if (modeValue === "qr") {
+    const { FpsphereQrPrintApp } = await import("./ar/FpsphereQrPrintApp");
+    return new FpsphereQrPrintApp(appMountNode);
+  }
+
+  const { GameApp } = await import("./game/GameApp");
+  return new GameApp(appMountNode);
 }
+
+const app = await createApp(mode);
 
 app.start();
 
