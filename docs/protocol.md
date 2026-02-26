@@ -11,6 +11,8 @@
 - `POST /api/v1/world/:world_id/commit`
   - request: `CommitRequest`
   - response: `CommitResponse`
+- `GET /ws?user_id=<id>&world_id=<id>` (WebSocket)
+  - realtime player presence updates
 
 ## WorldSnapshot (Rust API)
 
@@ -66,6 +68,74 @@
   - `move` and `delete` operations require target spheres to exist.
 - If master commit cannot be applied, backend attempts to save same operations into the user's branch.
 - If user-branch save also fails validation, commit is rejected with `409`.
+
+## WebSocket multiplayer messages
+
+Client -> server:
+- `hello`:
+```json
+{ "type": "hello", "user_id": "user-123", "world_id": "world-main" }
+```
+- `player_update`:
+```json
+{
+  "type": "player_update",
+  "position_3d": [1.0, 2.0, 3.0],
+  "yaw": 0.2,
+  "pitch": -0.1,
+  "client_tick": 42
+}
+```
+
+Server -> client:
+- `welcome`:
+```json
+{
+  "type": "welcome",
+  "player_id": "player-1",
+  "user_id": "user-123",
+  "world_id": "world-main"
+}
+```
+- `state_snapshot`:
+```json
+{
+  "type": "state_snapshot",
+  "world_id": "world-main",
+  "server_tick": 99,
+  "players": [
+    {
+      "player_id": "player-2",
+      "user_id": "user-456",
+      "world_id": "world-main",
+      "position_3d": [3.0, 1.0, 8.0],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "client_tick": 17,
+      "updated_at_ms": 1730000000000
+    }
+  ]
+}
+```
+- `world_commit_applied`:
+```json
+{
+  "type": "world_commit_applied",
+  "world_id": "world-main",
+  "commit_id": "master-12",
+  "saved_to": "master",
+  "user_id": null,
+  "world": {
+    "world_id": "world-main",
+    "tick": 12,
+    "entities": []
+  }
+}
+```
+
+Delivery semantics:
+- `saved_to = master`: delivered to all clients connected to the same `world_id`.
+- `saved_to = user`: delivered only to connections for that same `user_id` and `world_id`.
 
 ## Contract alignment
 

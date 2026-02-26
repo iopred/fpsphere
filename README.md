@@ -31,6 +31,9 @@ Initial implementation scaffold for:
 5. Save edits:
    - Press `Cmd+S` (macOS) or `Ctrl+S` (Windows/Linux) to commit local edits.
    - Backend saves to `master` when possible, otherwise falls back to a per-user branch.
+6. Multiplayer:
+   - Frontend opens a WebSocket connection to `/ws` (proxied to backend).
+   - Open multiple browser tabs/windows to see remote players.
 
 ### Backend
 
@@ -45,6 +48,8 @@ Initial implementation scaffold for:
    - `http://127.0.0.1:4000/api/v1/world/world-main`
 5. Commit endpoint:
    - `POST http://127.0.0.1:4000/api/v1/world/world-main/commit`
+6. Multiplayer endpoint:
+   - `ws://127.0.0.1:4000/ws?user_id=<id>&world_id=world-main`
 
 ## Current milestone status
 

@@ -131,7 +131,7 @@ Each workstream below is intentionally parallelizable. Task IDs are dependency-a
 
 ## Workstream A: Backend (Rust)
 
-### [ ] A1. Service scaffold and contracts
+### [x] A1. Service scaffold and contracts
 - Define API/protocol for:
   - world sphere fetch
   - entity snapshot
@@ -149,7 +149,7 @@ Delivers: `backend` crate + protocol docs
 Depends on: A1  
 Delivers: simulation module + test suite
 
-### [ ] A3. State sync transport prototype
+### [x] A3. State sync transport prototype
 - WebSocket transport for snapshots and input messages.
 - Sequence IDs and tick IDs for reconciliation.
 
@@ -341,6 +341,7 @@ Then merge for integration sprint:
 - [x] Connect frontend world loading to backend snapshot endpoint.
 - [x] Add backend commit endpoint with master/user branch fallback.
 - [x] Add frontend save shortcut (`Cmd/Ctrl+S`) for commit submission.
+- [x] Add WebSocket multiplayer transport and remote player snapshots.
 - [x] Implement editor mode toggle with `~`.
 - [x] Implement edit shortcuts in editor mode: `C`, `Q`, `E`, `Z`.
 - [x] Add layout-aware keybinding tests for Dvorak and QWERTY.

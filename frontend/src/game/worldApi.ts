@@ -2,12 +2,12 @@ import type { SphereEntity } from "@fpsphere/shared-types";
 import { parseSphereEntities } from "@fpsphere/shared-types";
 import type { SeedWorld } from "./worldSeed";
 
-interface BackendTimeWindow {
+export interface BackendTimeWindow {
   start_tick: number;
   end_tick: number | null;
 }
 
-interface BackendSphereEntity {
+export interface BackendSphereEntity {
   id: string;
   parent_id: string | null;
   radius: number;
@@ -17,7 +17,7 @@ interface BackendSphereEntity {
   tags: string[];
 }
 
-interface BackendWorldSnapshot {
+export interface BackendWorldSnapshot {
   world_id: string;
   tick: number;
   entities: BackendSphereEntity[];
@@ -138,7 +138,7 @@ function transformBackendEntity(entity: BackendSphereEntity): unknown {
   };
 }
 
-function parseLoadedWorld(payload: BackendWorldSnapshot): LoadedWorld {
+export function parseLoadedWorldSnapshot(payload: BackendWorldSnapshot): LoadedWorld {
   if (!Array.isArray(payload.entities)) {
     throw new Error("Invalid world snapshot payload: entities must be an array");
   }
@@ -196,7 +196,7 @@ export async function fetchWorldSeed(
   }
 
   const payload = (await response.json()) as BackendWorldSnapshot;
-  return parseLoadedWorld(payload);
+  return parseLoadedWorldSnapshot(payload);
 }
 
 export async function commitWorldChanges(
@@ -228,7 +228,7 @@ export async function commitWorldChanges(
   }
 
   const payload = (await response.json()) as BackendCommitResponse;
-  const parsedWorld = parseLoadedWorld(payload.world);
+  const parsedWorld = parseLoadedWorldSnapshot(payload.world);
 
   return {
     commitId: payload.commit_id,

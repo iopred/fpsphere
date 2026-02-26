@@ -1,0 +1,274 @@
+use crate::protocol::{CommitTarget, WorldSnapshot};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::{broadcast, RwLock};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiplayerPlayerState {
+    pub player_id: String,
+    pub user_id: String,
+    pub world_id: String,
+    pub position_3d: [f32; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+    pub client_tick: u64,
+    pub updated_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ClientMultiplayerMessage {
+    Hello {
+        user_id: Option<String>,
+        world_id: Option<String>,
+    },
+    PlayerUpdate {
+        position_3d: [f32; 3],
+        yaw: f32,
+        pitch: f32,
+        client_tick: u64,
+    },
+    Ping,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ServerMultiplayerMessage {
+    Welcome {
+        player_id: String,
+        user_id: String,
+        world_id: String,
+    },
+    StateSnapshot {
+        world_id: String,
+        server_tick: u64,
+        players: Vec<MultiplayerPlayerState>,
+    },
+    WorldCommitApplied {
+        world_id: String,
+        commit_id: String,
+        saved_to: CommitTarget,
+        user_id: Option<String>,
+        world: WorldSnapshot,
+    },
+    Error {
+        message: String,
+    },
+    Pong,
+}
+
+#[derive(Clone)]
+pub struct MultiplayerHub {
+    players: Arc<RwLock<HashMap<String, MultiplayerPlayerState>>>,
+    player_seq: Arc<AtomicU64>,
+    server_tick: Arc<AtomicU64>,
+    tx: broadcast::Sender<ServerMultiplayerMessage>,
+}
+
+impl MultiplayerHub {
+    pub fn new() -> Self {
+        let (tx, _) = broadcast::channel(256);
+
+        Self {
+            players: Arc::new(RwLock::new(HashMap::new())),
+            player_seq: Arc::new(AtomicU64::new(0)),
+            server_tick: Arc::new(AtomicU64::new(0)),
+            tx,
+        }
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<ServerMultiplayerMessage> {
+        self.tx.subscribe()
+    }
+
+    pub async fn add_player(&self, user_id: String, world_id: String) -> MultiplayerPlayerState {
+        let player_id = format!(
+            "player-{}",
+            self.player_seq.fetch_add(1, Ordering::SeqCst) + 1
+        );
+        let player_state = MultiplayerPlayerState {
+            player_id: player_id.clone(),
+            user_id,
+            world_id: world_id.clone(),
+            position_3d: [0.0, -2.5, 16.0],
+            yaw: 0.0,
+            pitch: 0.0,
+            client_tick: 0,
+            updated_at_ms: now_millis(),
+        };
+
+        self.players
+            .write()
+            .await
+            .insert(player_id, player_state.clone());
+        self.broadcast_world_snapshot(&world_id).await;
+
+        player_state
+    }
+
+    pub async fn set_player_identity(&self, player_id: &str, user_id: Option<String>) {
+        let Some(next_user_id) = user_id else {
+            return;
+        };
+
+        if next_user_id.trim().is_empty() {
+            return;
+        }
+
+        let mut world_id_to_broadcast: Option<String> = None;
+        {
+            let mut players = self.players.write().await;
+            if let Some(player) = players.get_mut(player_id) {
+                player.user_id = next_user_id;
+                player.updated_at_ms = now_millis();
+                world_id_to_broadcast = Some(player.world_id.clone());
+            }
+        }
+
+        if let Some(world_id) = world_id_to_broadcast {
+            self.broadcast_world_snapshot(&world_id).await;
+        }
+    }
+
+    pub async fn update_player(
+        &self,
+        player_id: &str,
+        position_3d: [f32; 3],
+        yaw: f32,
+        pitch: f32,
+        client_tick: u64,
+    ) -> bool {
+        let mut world_id_to_broadcast: Option<String> = None;
+
+        {
+            let mut players = self.players.write().await;
+            if let Some(player) = players.get_mut(player_id) {
+                player.position_3d = position_3d;
+                player.yaw = yaw;
+                player.pitch = pitch;
+                player.client_tick = client_tick;
+                player.updated_at_ms = now_millis();
+                world_id_to_broadcast = Some(player.world_id.clone());
+            }
+        }
+
+        if let Some(world_id) = world_id_to_broadcast {
+            self.broadcast_world_snapshot(&world_id).await;
+            return true;
+        }
+
+        false
+    }
+
+    pub async fn remove_player(&self, player_id: &str) {
+        let removed_world_id = self
+            .players
+            .write()
+            .await
+            .remove(player_id)
+            .map(|item| item.world_id);
+
+        if let Some(world_id) = removed_world_id {
+            self.broadcast_world_snapshot(&world_id).await;
+        }
+    }
+
+    pub async fn broadcast_world_snapshot(&self, world_id: &str) {
+        let mut players = {
+            let map = self.players.read().await;
+            map.values()
+                .filter(|item| item.world_id == world_id)
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+
+        players.sort_by(|a, b| a.player_id.cmp(&b.player_id));
+
+        let server_tick = self.server_tick.fetch_add(1, Ordering::SeqCst) + 1;
+        let _ = self.tx.send(ServerMultiplayerMessage::StateSnapshot {
+            world_id: world_id.to_string(),
+            server_tick,
+            players,
+        });
+    }
+
+    pub fn broadcast_world_commit(
+        &self,
+        world_id: String,
+        commit_id: String,
+        saved_to: CommitTarget,
+        user_id: Option<String>,
+        world: WorldSnapshot,
+    ) {
+        let _ = self.tx.send(ServerMultiplayerMessage::WorldCommitApplied {
+            world_id,
+            commit_id,
+            saved_to,
+            user_id,
+            world,
+        });
+    }
+}
+
+fn now_millis() -> u64 {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_millis() as u64,
+        Err(_) => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MultiplayerHub, ServerMultiplayerMessage};
+    use crate::protocol::{example_world_snapshot, CommitTarget};
+
+    #[tokio::test]
+    async fn add_update_and_remove_player() {
+        let hub = MultiplayerHub::new();
+        let player = hub
+            .add_player("user-a".to_string(), "world-main".to_string())
+            .await;
+
+        let updated = hub
+            .update_player(&player.player_id, [2.0, 3.0, 4.0], 1.0, 0.5, 7)
+            .await;
+        assert!(updated);
+
+        hub.remove_player(&player.player_id).await;
+    }
+
+    #[tokio::test]
+    async fn world_commit_broadcast_emits_message() {
+        let hub = MultiplayerHub::new();
+        let mut rx = hub.subscribe();
+        let world = example_world_snapshot();
+
+        hub.broadcast_world_commit(
+            world.world_id.clone(),
+            "master-1".to_string(),
+            CommitTarget::Master,
+            None,
+            world.clone(),
+        );
+
+        let received = rx.recv().await.expect("commit broadcast message");
+        match received {
+            ServerMultiplayerMessage::WorldCommitApplied {
+                world_id,
+                commit_id,
+                saved_to,
+                world: payload_world,
+                ..
+            } => {
+                assert_eq!(world_id, world.world_id);
+                assert_eq!(commit_id, "master-1");
+                assert!(matches!(saved_to, CommitTarget::Master));
+                assert_eq!(payload_world.tick, world.tick);
+            }
+            _ => panic!("unexpected message type"),
+        }
+    }
+}

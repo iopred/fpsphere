@@ -12,9 +12,16 @@ import { buildSeedWorld } from "./worldSeed";
 import {
   commitWorldChanges,
   fetchWorldSeed,
+  parseLoadedWorldSnapshot,
   type WorldCommitOperation,
   WorldCommitError,
 } from "./worldApi";
+import {
+  MultiplayerClient,
+  type MultiplayerSnapshot,
+  type MultiplayerWorldCommit,
+  type RemotePlayerState,
+} from "./multiplayerClient";
 import { LocalWorldStore, type WorldStoreSnapshot } from "./worldStore";
 
 const FIXED_STEP_SECONDS = 1 / 60;
@@ -29,6 +36,8 @@ const CREATED_SPHERE_RADIUS = 2.4;
 const CREATE_DISTANCE = 8;
 const CREATE_BOUNDARY_MARGIN = 0.35;
 const WORLD_ID = "world-main";
+const REMOTE_PLAYER_RADIUS = 0.9;
+const NETWORK_SEND_INTERVAL_TICKS = 2;
 
 const tempForward = new THREE.Vector3();
 const tempOffset = new THREE.Vector3();
@@ -63,6 +72,9 @@ export class GameApp {
   private readonly worldMeshes = new Map<string, THREE.Mesh>();
   private readonly obstacleMeshes = new Map<string, THREE.Mesh>();
   private readonly obstacleBodiesById = new Map<string, ObstacleBody>();
+  private readonly multiplayerClient = new MultiplayerClient();
+  private readonly remotePlayers = new Map<string, RemotePlayerState>();
+  private readonly remotePlayerMeshes = new Map<string, THREE.Mesh>();
   private readonly raycaster = new THREE.Raycaster();
   private obstacles: ObstacleBody[] = [];
   private unsubscribeWorldStore: (() => void) | null = null;
@@ -77,6 +89,10 @@ export class GameApp {
   private saveMessage = "no pending edits";
   private backendWorldTick = 0;
   private readonly userId = this.getOrCreateUserId();
+  private localPlayerId: string | null = null;
+  private multiplayerStatus = "disconnected";
+  private multiplayerError: string | null = null;
+  private lastNetworkSendTick = 0;
   private worldSourceState: "seed" | "loading" | "backend" | "backend-user" = "loading";
   private disposed = false;
 
@@ -100,6 +116,7 @@ export class GameApp {
     this.controller = new FpsController(this.renderer.domElement);
 
     this.setupScene();
+    this.connectMultiplayer();
     this.unsubscribeWorldStore = this.worldStore.subscribe(this.onWorldStoreChanged);
     this.updateHintText();
     this.recolorObstacles();
@@ -127,6 +144,8 @@ export class GameApp {
       this.unsubscribeWorldStore();
       this.unsubscribeWorldStore = null;
     }
+    this.multiplayerClient.disconnect();
+    this.clearRemotePlayers();
     window.removeEventListener("resize", this.onResize);
     document.removeEventListener("pointerlockchange", this.onPointerLockChange);
     document.removeEventListener("keydown", this.onKeyDown);
@@ -329,6 +348,144 @@ export class GameApp {
     this.recolorObstacles();
   }
 
+  private connectMultiplayer(): void {
+    this.multiplayerClient.connect({
+      userId: this.userId,
+      worldId: WORLD_ID,
+      callbacks: {
+        onStatus: (status) => {
+          this.multiplayerStatus = status;
+          if (status === "disconnected") {
+            this.localPlayerId = null;
+            this.clearRemotePlayers();
+          }
+        },
+        onWelcome: (playerId) => {
+          this.localPlayerId = playerId;
+          this.multiplayerError = null;
+        },
+        onSnapshot: (snapshot) => {
+          this.applyMultiplayerSnapshot(snapshot);
+        },
+        onWorldCommit: (commit) => {
+          this.applyMultiplayerWorldCommit(commit);
+        },
+        onError: (message) => {
+          this.multiplayerError = message;
+        },
+      },
+    });
+  }
+
+  private applyMultiplayerSnapshot(snapshot: MultiplayerSnapshot): void {
+    if (snapshot.world_id !== WORLD_ID) {
+      return;
+    }
+
+    const nextIds = new Set<string>();
+    for (const remotePlayer of snapshot.players) {
+      if (remotePlayer.player_id === this.localPlayerId) {
+        continue;
+      }
+
+      nextIds.add(remotePlayer.player_id);
+      this.remotePlayers.set(remotePlayer.player_id, remotePlayer);
+      this.upsertRemotePlayerMesh(remotePlayer);
+    }
+
+    for (const existingId of [...this.remotePlayers.keys()]) {
+      if (nextIds.has(existingId)) {
+        continue;
+      }
+      this.remotePlayers.delete(existingId);
+      this.removeRemotePlayerMesh(existingId);
+    }
+  }
+
+  private applyMultiplayerWorldCommit(commit: MultiplayerWorldCommit): void {
+    if (commit.world_id !== WORLD_ID) {
+      return;
+    }
+
+    if (commit.saved_to === "user" && commit.user_id !== this.userId) {
+      return;
+    }
+
+    try {
+      const loaded = parseLoadedWorldSnapshot(commit.world);
+      this.worldStore.apply({
+        type: "hydrateWorld",
+        world: loaded.world,
+      });
+      this.backendWorldTick = loaded.tick;
+      this.worldSourceState = commit.saved_to === "master" ? "backend" : "backend-user";
+      this.multiplayerError = null;
+
+      if (!this.saveInFlight) {
+        this.saveMessage = `synced ${commit.commit_id} via multiplayer`;
+      }
+    } catch (error) {
+      this.multiplayerError =
+        error instanceof Error
+          ? `world sync failed: ${error.message}`
+          : "world sync failed: unknown error";
+    }
+  }
+
+  private upsertRemotePlayerMesh(remotePlayer: RemotePlayerState): void {
+    const existingMesh = this.remotePlayerMeshes.get(remotePlayer.player_id);
+    if (existingMesh) {
+      existingMesh.position.set(
+        remotePlayer.position_3d[0],
+        remotePlayer.position_3d[1],
+        remotePlayer.position_3d[2],
+      );
+      return;
+    }
+
+    const geometry = new THREE.SphereGeometry(REMOTE_PLAYER_RADIUS, 18, 14);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x4be29f,
+      emissive: 0x0d5e43,
+      roughness: 0.45,
+      metalness: 0.2,
+    });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(
+      remotePlayer.position_3d[0],
+      remotePlayer.position_3d[1],
+      remotePlayer.position_3d[2],
+    );
+    this.scene.add(mesh);
+    this.remotePlayerMeshes.set(remotePlayer.player_id, mesh);
+  }
+
+  private removeRemotePlayerMesh(playerId: string): void {
+    const mesh = this.remotePlayerMeshes.get(playerId);
+    if (!mesh) {
+      return;
+    }
+
+    this.scene.remove(mesh);
+    mesh.geometry.dispose();
+    if (Array.isArray(mesh.material)) {
+      for (const material of mesh.material) {
+        material.dispose();
+      }
+    } else {
+      mesh.material.dispose();
+    }
+    this.remotePlayerMeshes.delete(playerId);
+  }
+
+  private clearRemotePlayers(): void {
+    for (const playerId of [...this.remotePlayerMeshes.keys()]) {
+      this.removeRemotePlayerMesh(playerId);
+    }
+    this.remotePlayers.clear();
+  }
+
   private addObstacleMesh(obstacle: ObstacleBody): void {
     const sphereGeometry = new THREE.SphereGeometry(obstacle.radius, 24, 18);
     const sphereMaterial = new THREE.MeshStandardMaterial({
@@ -481,6 +638,17 @@ export class GameApp {
 
     this.lastCollisionCount = resolveSphereCollisions(this.player, this.obstacles);
     constrainInsideParentSphere(this.player, this.parentCenter, this.parentSphere.radius);
+
+    if (this.tick - this.lastNetworkSendTick >= NETWORK_SEND_INTERVAL_TICKS) {
+      const orientation = this.controller.getOrientation();
+      this.multiplayerClient.sendPlayerUpdate(
+        [this.player.position.x, this.player.position.y, this.player.position.z],
+        orientation.yaw,
+        orientation.pitch,
+        this.tick,
+      );
+      this.lastNetworkSendTick = this.tick;
+    }
   }
 
   private syncCamera(): void {
@@ -649,6 +817,10 @@ export class GameApp {
       `world tick: ${this.backendWorldTick}\n` +
       `pending edits: ${this.pendingCommitOperations.length}\n` +
       `save: ${this.saveMessage}\n` +
-      `user: ${this.userId}`;
+      `user: ${this.userId}\n` +
+      `multiplayer: ${this.multiplayerStatus}\n` +
+      `player id: ${this.localPlayerId ?? "pending"}\n` +
+      `remote players: ${this.remotePlayers.size}\n` +
+      `mp error: ${this.multiplayerError ?? "none"}`;
   }
 }
