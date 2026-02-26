@@ -38,6 +38,8 @@ struct CommitErrorResponse {
 
 #[tokio::main]
 async fn main() {
+    let _ = dotenvy::from_filename(".env");
+
     tracing_subscriber::fmt()
         .with_env_filter(
             std::env::var("RUST_LOG")
@@ -57,7 +59,10 @@ async fn main() {
         .route("/api/v1/world/{world_id}/commit", post(commit_world))
         .with_state(app_state);
 
-    let bind_address = SocketAddr::from(([127, 0, 0, 1], 4000));
+    let bind_address = std::env::var("BIND_ADDR")
+        .unwrap_or_else(|_| "127.0.0.1:4000".to_string())
+        .parse::<SocketAddr>()
+        .expect("BIND_ADDR must be a valid socket address, e.g. 127.0.0.1:4000");
     tracing::info!("backend listening on {}", bind_address);
 
     let listener = tokio::net::TcpListener::bind(bind_address)

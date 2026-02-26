@@ -34,13 +34,16 @@ Initial implementation scaffold for:
 
 ### Backend
 
-1. Start API service:
+1. Configure backend env:
+   - Defaults are in `backend/.env`.
+   - For LAN access, set `BIND_ADDR=0.0.0.0:4000`.
+2. Start API service:
    - `cd backend && cargo run`
-2. Health check:
+3. Health check:
    - `http://127.0.0.1:4000/healthz`
-3. Example world snapshot:
+4. Example world snapshot:
    - `http://127.0.0.1:4000/api/v1/world/world-main`
-4. Commit endpoint:
+5. Commit endpoint:
    - `POST http://127.0.0.1:4000/api/v1/world/world-main/commit`
 
 ## Current milestone status
