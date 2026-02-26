@@ -50,6 +50,10 @@ body,
   pointer-events: auto;
 }
 
+.template-hud[hidden] {
+  display: none;
+}
+
 .template-hud-disabled {
   opacity: 0.7;
 }

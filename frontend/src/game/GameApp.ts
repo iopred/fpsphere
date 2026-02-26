@@ -498,6 +498,7 @@ export class GameApp {
     const selectedSphere = this.getSelectedEditableSphere();
     const selectedTemplateId = this.readTemplateId(selectedSphere);
 
+    this.templateHudNode.hidden = !this.editorMode;
     this.templateHudNode.classList.toggle("template-hud-disabled", !this.editorMode);
     this.createTemplateValueNode.textContent = `${this.createTemplateId}`;
     this.selectedTemplateValueNode.textContent = selectedSphere
