@@ -269,6 +269,7 @@ export class FpsphereArApp {
   });
   private readonly markerAnchor = new THREE.Group();
   private readonly worldGroup = new THREE.Group();
+  private readonly worldContentGroup = new THREE.Group();
 
   private readonly worldStore = new LocalWorldStore(buildSeedWorld());
   private parentSphere = this.worldStore.getParentSphere();
@@ -309,6 +310,7 @@ export class FpsphereArApp {
   private readonly userId = this.getOrCreateUserId();
   private unsubscribeWorldStore: (() => void) | null = null;
   private currentWorldScaleMultiplier = DEFAULT_WORLD_SCALE_MULTIPLIER;
+  private readonly autoCenterOffset = new THREE.Vector3();
 
   constructor(private readonly mountNode: HTMLDivElement) {
     this.mountNode.innerHTML = "";
@@ -417,7 +419,7 @@ export class FpsphereArApp {
     this.clearObstacles();
 
     if (this.parentMesh) {
-      this.worldGroup.remove(this.parentMesh);
+      this.worldContentGroup.remove(this.parentMesh);
       this.parentMesh.geometry.dispose();
       if (Array.isArray(this.parentMesh.material)) {
         for (const material of this.parentMesh.material) {
@@ -461,9 +463,11 @@ export class FpsphereArApp {
     });
     this.parentMesh = new THREE.Mesh(parentGeometry, parentMaterial);
     this.parentMesh.visible = false;
-    this.worldGroup.add(this.parentMesh);
+    this.worldContentGroup.add(this.parentMesh);
 
     this.worldGroup.position.z = WORLD_RENDER_LIFT_METERS;
+    this.worldContentGroup.position.copy(this.autoCenterOffset);
+    this.worldGroup.add(this.worldContentGroup);
     this.markerAnchor.add(this.worldGroup);
     this.markerAnchor.visible = false;
     this.scene.add(this.markerAnchor);
@@ -855,7 +859,7 @@ export class FpsphereArApp {
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(x, y, z);
-    this.worldGroup.add(mesh);
+    this.worldContentGroup.add(mesh);
     this.remotePlayerMeshes.set(remotePlayer.player_id, mesh);
   }
 
@@ -865,7 +869,7 @@ export class FpsphereArApp {
       return;
     }
 
-    this.worldGroup.remove(mesh);
+    this.worldContentGroup.remove(mesh);
     mesh.geometry.dispose();
     if (Array.isArray(mesh.material)) {
       for (const material of mesh.material) {
@@ -1128,6 +1132,7 @@ export class FpsphereArApp {
       this.removeObstacleById(id);
     }
 
+    this.recenterWorldContent();
     this.recolorObstacles();
   }
 
@@ -1147,7 +1152,7 @@ export class FpsphereArApp {
     obstacleMesh.scale.setScalar(obstacle.radius);
     obstacleMesh.userData.sphereId = obstacle.id;
     obstacleMesh.userData.portalHost = obstacle.portalHost;
-    this.worldGroup.add(obstacleMesh);
+    this.worldContentGroup.add(obstacleMesh);
     this.obstacleMeshes.set(obstacle.id, obstacleMesh);
   }
 
@@ -1156,7 +1161,7 @@ export class FpsphereArApp {
 
     const mesh = this.obstacleMeshes.get(obstacleId);
     if (mesh) {
-      this.worldGroup.remove(mesh);
+      this.worldContentGroup.remove(mesh);
       mesh.geometry.dispose();
       if (Array.isArray(mesh.material)) {
         for (const material of mesh.material) {
@@ -1200,6 +1205,57 @@ export class FpsphereArApp {
       this.removeObstacleById(id);
     }
     this.obstaclesById.clear();
+  }
+
+  private recenterWorldContent(): void {
+    const visibleObstacles = [...this.obstaclesById.values()].filter(
+      (obstacle) => !obstacle.portalHost,
+    );
+    if (visibleObstacles.length === 0) {
+      this.autoCenterOffset.set(0, 0, 0);
+      this.worldContentGroup.position.copy(this.autoCenterOffset);
+      return;
+    }
+
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let minZ = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    let maxZ = Number.NEGATIVE_INFINITY;
+
+    for (const obstacle of visibleObstacles) {
+      const x = obstacle.center.x - this.parentCenter.x;
+      const y = obstacle.center.y - this.parentCenter.y;
+      const z = obstacle.center.z - this.parentCenter.z;
+      const r = Math.max(0, obstacle.radius);
+
+      minX = Math.min(minX, x - r);
+      minY = Math.min(minY, y - r);
+      minZ = Math.min(minZ, z - r);
+      maxX = Math.max(maxX, x + r);
+      maxY = Math.max(maxY, y + r);
+      maxZ = Math.max(maxZ, z + r);
+    }
+
+    if (
+      !Number.isFinite(minX) ||
+      !Number.isFinite(minY) ||
+      !Number.isFinite(minZ) ||
+      !Number.isFinite(maxX) ||
+      !Number.isFinite(maxY) ||
+      !Number.isFinite(maxZ)
+    ) {
+      this.autoCenterOffset.set(0, 0, 0);
+      this.worldContentGroup.position.copy(this.autoCenterOffset);
+      return;
+    }
+
+    const centerX = (minX + maxX) * 0.5;
+    const centerY = (minY + maxY) * 0.5;
+    const centerZ = (minZ + maxZ) * 0.5;
+    this.autoCenterOffset.set(-centerX, -centerY, -centerZ);
+    this.worldContentGroup.position.copy(this.autoCenterOffset);
   }
 
   private getOrCreateUserId(): string {
