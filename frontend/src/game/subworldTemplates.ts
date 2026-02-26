@@ -2,6 +2,8 @@ import type { SphereEntity, Vector3Tuple } from "@fpsphere/shared-types";
 
 export const SUBWORLD_TEMPLATE_DIMENSION = "world_template";
 export const SUBWORLD_SCALE_DIMENSION = "world_scale";
+export const TEMPLATE_ROOT_TAG = "template-root";
+export const TEMPLATE_DEFINITION_TAG = "template-definition";
 
 interface SubworldTemplateChild {
   id: string;
@@ -52,6 +54,19 @@ export function getAvailableSubworldTemplateIds(): number[] {
     .map((value) => Number.parseInt(value, 10))
     .filter((value) => Number.isFinite(value) && value > 0)
     .sort((a, b) => a - b);
+}
+
+export function getTemplateRootSphereId(templateId: number): string {
+  return `sphere-template-root-${templateId}`;
+}
+
+export function getTemplateRootRadius(templateId: number): number {
+  const template = SUBWORLD_TEMPLATES[templateId];
+  if (template && Number.isFinite(template.rootRadius) && template.rootRadius > 0) {
+    return template.rootRadius;
+  }
+
+  return 12;
 }
 
 function resolveTemplateId(entity: SphereEntity): number | null {

@@ -10,7 +10,11 @@ import {
 import { KEYBINDINGS, matchesKeyBinding } from "./keybindings";
 import {
   getAvailableSubworldTemplateIds,
+  getTemplateRootRadius,
+  getTemplateRootSphereId,
   instantiateSubworldChildren,
+  TEMPLATE_DEFINITION_TAG,
+  TEMPLATE_ROOT_TAG,
   SUBWORLD_SCALE_DIMENSION,
   SUBWORLD_TEMPLATE_DIMENSION,
 } from "./subworldTemplates";
@@ -576,6 +580,200 @@ export class GameApp {
     return Math.max(TEMPLATE_NONE_ID, Math.trunc(value));
   }
 
+  private isTemplateRootSphere(entity: SphereEntity): boolean {
+    return entity.tags.includes(TEMPLATE_ROOT_TAG);
+  }
+
+  private getTemplateRootSphere(templateId: number): SphereEntity | null {
+    if (templateId <= TEMPLATE_NONE_ID) {
+      return null;
+    }
+
+    return this.worldStore.getSphereById(getTemplateRootSphereId(templateId));
+  }
+
+  private resolveTemplateHostScale(hostSphere: SphereEntity, templateRootRadius: number): number {
+    if (!Number.isFinite(templateRootRadius) || templateRootRadius <= 0) {
+      return 0;
+    }
+
+    const baseScale = hostSphere.radius / templateRootRadius;
+    if (!Number.isFinite(baseScale) || baseScale <= 0) {
+      return 0;
+    }
+
+    const dimensionScale = hostSphere.dimensions[SUBWORLD_SCALE_DIMENSION];
+    const extraScale = Number.isFinite(dimensionScale) && dimensionScale > 0 ? dimensionScale : 1;
+
+    return baseScale * extraScale;
+  }
+
+  private ensureTemplateRootSphere(templateId: number): SphereEntity | null {
+    const existing = this.getTemplateRootSphere(templateId);
+    if (existing) {
+      return existing;
+    }
+
+    const rootWorld = this.worldStore.getRootSphere();
+    const templateRoot: SphereEntity = {
+      id: getTemplateRootSphereId(templateId),
+      parentId: rootWorld.id,
+      radius: getTemplateRootRadius(templateId),
+      position3d: [...rootWorld.position3d],
+      dimensions: {
+        money: 0,
+        [SUBWORLD_TEMPLATE_DIMENSION]: templateId,
+        [SUBWORLD_SCALE_DIMENSION]: 1,
+      },
+      timeWindow: {
+        start: this.tick,
+        end: null,
+      },
+      tags: [TEMPLATE_ROOT_TAG, `template-${templateId}`],
+    };
+
+    const created = this.worldStore.apply({
+      type: "createSphere",
+      sphere: templateRoot,
+    });
+    if (!created) {
+      return this.getTemplateRootSphere(templateId);
+    }
+
+    this.queueCreateSphereOperation(templateRoot);
+    this.refreshPendingSaveMessage();
+    return templateRoot;
+  }
+
+  private seedSharedTemplateDefinitionIfNeeded(
+    templateRoot: SphereEntity,
+    sourceHost: SphereEntity,
+  ): void {
+    if (this.worldStore.listChildrenOf(templateRoot.id).length > 0) {
+      return;
+    }
+
+    const hostScale = this.resolveTemplateHostScale(sourceHost, templateRoot.radius);
+    const legacyChildren = this.worldStore
+      .listChildrenOf(sourceHost.id)
+      .filter((child) => !child.tags.includes("instanced-subworld"));
+
+    const nextChildren: SphereEntity[] = [];
+    if (legacyChildren.length > 0 && hostScale > 0) {
+      for (const legacyChild of legacyChildren) {
+        nextChildren.push({
+          id: `${templateRoot.id}::from-${legacyChild.id}`,
+          parentId: templateRoot.id,
+          radius: Math.max(0.05, legacyChild.radius / hostScale),
+          position3d: [
+            templateRoot.position3d[0] + (legacyChild.position3d[0] - sourceHost.position3d[0]) / hostScale,
+            templateRoot.position3d[1] + (legacyChild.position3d[1] - sourceHost.position3d[1]) / hostScale,
+            templateRoot.position3d[2] + (legacyChild.position3d[2] - sourceHost.position3d[2]) / hostScale,
+          ],
+          dimensions: { ...legacyChild.dimensions },
+          timeWindow: { ...legacyChild.timeWindow },
+          tags: [
+            ...legacyChild.tags.filter((tag) => tag !== "instanced-subworld" && tag !== TEMPLATE_ROOT_TAG),
+            TEMPLATE_DEFINITION_TAG,
+          ],
+        });
+      }
+    } else {
+      const seedHost: SphereEntity = {
+        ...templateRoot,
+        dimensions: {
+          ...templateRoot.dimensions,
+          [SUBWORLD_TEMPLATE_DIMENSION]: this.readTemplateId(sourceHost),
+          [SUBWORLD_SCALE_DIMENSION]: 1,
+        },
+      };
+      for (const child of instantiateSubworldChildren([seedHost])) {
+        nextChildren.push({
+          ...child,
+          tags: [
+            ...child.tags.filter((tag) => tag !== "instanced-subworld"),
+            TEMPLATE_DEFINITION_TAG,
+          ],
+        });
+      }
+    }
+
+    let createdCount = 0;
+    for (const child of nextChildren) {
+      const created = this.worldStore.apply({
+        type: "createSphere",
+        sphere: child,
+      });
+      if (!created) {
+        continue;
+      }
+
+      this.queueCreateSphereOperation(child);
+      createdCount += 1;
+    }
+
+    if (createdCount > 0) {
+      this.refreshPendingSaveMessage();
+    }
+  }
+
+  private instantiateSharedTemplateChildren(hostSpheres: SphereEntity[]): SphereEntity[] {
+    const derived: SphereEntity[] = [];
+
+    for (const hostSphere of hostSpheres) {
+      const templateId = this.readTemplateId(hostSphere);
+      if (templateId <= TEMPLATE_NONE_ID) {
+        continue;
+      }
+
+      const templateRoot = this.getTemplateRootSphere(templateId);
+      if (!templateRoot) {
+        continue;
+      }
+
+      const templateChildren = this.worldStore.listChildrenOf(templateRoot.id);
+      if (templateChildren.length === 0) {
+        continue;
+      }
+
+      const hostScale = this.resolveTemplateHostScale(hostSphere, templateRoot.radius);
+      if (hostScale <= 0) {
+        continue;
+      }
+
+      for (const templateChild of templateChildren) {
+        const offsetX = templateChild.position3d[0] - templateRoot.position3d[0];
+        const offsetY = templateChild.position3d[1] - templateRoot.position3d[1];
+        const offsetZ = templateChild.position3d[2] - templateRoot.position3d[2];
+
+        derived.push({
+          id: `${hostSphere.id}::template-${templateId}::entity-${templateChild.id}`,
+          parentId: hostSphere.id,
+          radius: Math.max(0.05, templateChild.radius * hostScale),
+          position3d: [
+            hostSphere.position3d[0] + offsetX * hostScale,
+            hostSphere.position3d[1] + offsetY * hostScale,
+            hostSphere.position3d[2] + offsetZ * hostScale,
+          ],
+          dimensions: { ...templateChild.dimensions },
+          timeWindow: { ...hostSphere.timeWindow },
+          tags: [
+            ...templateChild.tags.filter(
+              (tag) =>
+                tag !== TEMPLATE_DEFINITION_TAG &&
+                tag !== TEMPLATE_ROOT_TAG &&
+                tag !== "instanced-subworld",
+            ),
+            "instanced-subworld",
+            `template-${templateId}`,
+          ],
+        });
+      }
+    }
+
+    return derived;
+  }
+
   private getTemplateChoiceIndex(templateId: number): number {
     const exactIndex = this.templateIdChoices.indexOf(templateId);
     if (exactIndex >= 0) {
@@ -683,14 +881,21 @@ export class GameApp {
     if (selectedSphere) {
       const templateId = this.readTemplateId(selectedSphere);
       if (templateId > TEMPLATE_NONE_ID) {
-        this.seedTemplateWorldIfNeeded(selectedSphere);
+        const templateRoot = this.ensureTemplateRootSphere(templateId);
+        if (!templateRoot) {
+          return;
+        }
+        this.seedSharedTemplateDefinitionIfNeeded(templateRoot, selectedSphere);
+
         const entered = this.worldStore.apply({
           type: "enterSphere",
-          sphereId: selectedSphere.id,
+          sphereId: templateRoot.id,
         });
         if (entered) {
+          this.createTemplateId = TEMPLATE_NONE_ID;
           this.stopDraggingSphere();
           this.movePlayerToCurrentWorld();
+          this.updateTemplateHud();
         }
         return;
       }
@@ -700,40 +905,6 @@ export class GameApp {
     if (exited) {
       this.stopDraggingSphere();
       this.movePlayerToCurrentWorld();
-    }
-  }
-
-  private seedTemplateWorldIfNeeded(hostSphere: SphereEntity): void {
-    const templateId = this.readTemplateId(hostSphere);
-    if (templateId <= TEMPLATE_NONE_ID) {
-      return;
-    }
-
-    if (this.worldStore.listDescendantsOf(hostSphere.id).length > 0) {
-      return;
-    }
-
-    const templateChildren = instantiateSubworldChildren([hostSphere]).map((child) => ({
-      ...child,
-      tags: child.tags.filter((tag) => tag !== "instanced-subworld"),
-    }));
-
-    let createdCount = 0;
-    for (const child of templateChildren) {
-      const created = this.worldStore.apply({
-        type: "createSphere",
-        sphere: child,
-      });
-      if (!created) {
-        continue;
-      }
-
-      this.queueCreateSphereOperation(child);
-      createdCount += 1;
-    }
-
-    if (createdCount > 0) {
-      this.refreshPendingSaveMessage();
     }
   }
 
@@ -803,9 +974,13 @@ export class GameApp {
   }
 
   private syncObstaclesFromSnapshot(snapshot: WorldStoreSnapshot): void {
-    const templateHosts = snapshot.parent.parentId === null
-      ? [snapshot.parent, ...snapshot.children]
-      : [...snapshot.children];
+    const rootView = snapshot.parent.parentId === null;
+    const visibleChildren = rootView
+      ? snapshot.children.filter((child) => !this.isTemplateRootSphere(child))
+      : snapshot.children;
+    const templateHosts = rootView
+      ? [snapshot.parent, ...visibleChildren]
+      : [...visibleChildren];
     const expandedChildren: SphereEntity[] = [];
     const expandedIds = new Set<string>();
 
@@ -817,17 +992,30 @@ export class GameApp {
       expandedIds.add(entity.id);
     };
 
-    for (const child of snapshot.children) {
+    for (const child of visibleChildren) {
       pushExpanded(child);
     }
 
-    for (const child of snapshot.children) {
+    for (const child of visibleChildren) {
+      const templateId = this.readTemplateId(child);
+      if (templateId > TEMPLATE_NONE_ID && this.getTemplateRootSphere(templateId)) {
+        continue;
+      }
       for (const descendant of this.worldStore.listDescendantsOf(child.id)) {
         pushExpanded(descendant);
       }
     }
 
-    for (const instancedChild of instantiateSubworldChildren(templateHosts)) {
+    for (const instancedChild of this.instantiateSharedTemplateChildren(templateHosts)) {
+      pushExpanded(instancedChild);
+    }
+
+    const fallbackTemplateHosts = templateHosts.filter((host) => {
+      const templateId = this.readTemplateId(host);
+      return templateId > TEMPLATE_NONE_ID && !this.getTemplateRootSphere(templateId);
+    });
+
+    for (const instancedChild of instantiateSubworldChildren(fallbackTemplateHosts)) {
       pushExpanded(instancedChild);
     }
 
@@ -842,7 +1030,9 @@ export class GameApp {
         Number.isFinite(templateId) &&
         Math.trunc(templateId) > TEMPLATE_NONE_ID;
       const selectable =
-        entity.parentId === snapshot.parent.id && !instancedSubworld;
+        entity.parentId === snapshot.parent.id &&
+        !instancedSubworld &&
+        !this.isTemplateRootSphere(entity);
 
       const existingBody = this.obstacleBodiesById.get(entity.id);
       if (!existingBody) {

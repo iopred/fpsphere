@@ -104,6 +104,15 @@ export class LocalWorldStore {
     return root;
   }
 
+  getRootSphere(): SphereEntity {
+    const root = this.entitiesById.get(this.rootSphereId);
+    if (!root) {
+      throw new Error("World store is missing root sphere");
+    }
+
+    return root;
+  }
+
   getSelectedSphereId(): string | null {
     return this.selectedSphereId;
   }
@@ -383,7 +392,7 @@ export class LocalWorldStore {
 
       case "enterSphere": {
         const sphere = this.entitiesById.get(command.sphereId);
-        if (!sphere || sphere.parentId !== this.activeParentId) {
+        if (!sphere || sphere.parentId === null) {
           return false;
         }
 
