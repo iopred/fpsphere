@@ -21,6 +21,11 @@ export type WorldEditCommand =
   | {
       type: "deleteSphere";
       sphereId: string;
+    }
+  | {
+      type: "updateSphereDimensions";
+      sphereId: string;
+      dimensions: Record<string, number>;
     };
 
 export interface WorldStoreSnapshot {
@@ -57,6 +62,10 @@ export class LocalWorldStore {
 
   getSelectedSphereId(): string | null {
     return this.selectedSphereId;
+  }
+
+  getChildSphereById(sphereId: string): SphereEntity | null {
+    return this.childrenById.get(sphereId) ?? null;
   }
 
   listChildSpheres(): SphereEntity[] {
@@ -177,6 +186,34 @@ export class LocalWorldStore {
         if (this.selectedSphereId === command.sphereId) {
           this.selectedSphereId = null;
         }
+        changed = true;
+        break;
+      }
+
+      case "updateSphereDimensions": {
+        const sphere = this.childrenById.get(command.sphereId);
+        if (!sphere) {
+          return false;
+        }
+
+        const nextDimensions = { ...sphere.dimensions };
+        let dimensionsChanged = false;
+        for (const [key, value] of Object.entries(command.dimensions)) {
+          if (!Number.isFinite(value)) {
+            continue;
+          }
+
+          if (nextDimensions[key] !== value) {
+            nextDimensions[key] = value;
+            dimensionsChanged = true;
+          }
+        }
+
+        if (!dimensionsChanged) {
+          return false;
+        }
+
+        sphere.dimensions = nextDimensions;
         changed = true;
         break;
       }

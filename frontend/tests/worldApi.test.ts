@@ -61,9 +61,14 @@ describe("worldApi", () => {
       const body = JSON.parse(String(init?.body));
       expect(body.user_id).toBe("user-1");
       expect(body.base_tick).toBe(4);
-      expect(body.operations).toHaveLength(2);
+      expect(body.operations).toHaveLength(3);
       expect(body.operations[0].type).toBe("create");
       expect(body.operations[1].type).toBe("delete");
+      expect(body.operations[2]).toEqual({
+        type: "update_dimensions",
+        sphere_id: "sphere-keep-001",
+        dimensions: { world_template: 1 },
+      });
 
       const responsePayload = {
         commit_id: "master-7",
@@ -122,6 +127,11 @@ describe("worldApi", () => {
       {
         type: "delete",
         sphereId: "sphere-old-001",
+      },
+      {
+        type: "updateDimensions",
+        sphereId: "sphere-keep-001",
+        dimensions: { world_template: 1 },
       },
     ];
 

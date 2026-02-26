@@ -34,6 +34,12 @@ Initial implementation scaffold for:
 6. Multiplayer:
    - Frontend opens a WebSocket connection to `/ws` (proxied to backend).
    - Open multiple browser tabs/windows to see remote players.
+7. Subworld instancing:
+   - Spheres with `dimensions.world_template` are expanded client-side into scaled sub-spheres.
+   - Editor-created spheres currently default to `world_template = 1` and `world_scale = 1`.
+8. Template selector HUD:
+   - Top-right HUD lets you pick the template id used by `C` create in editor mode.
+   - The same HUD can change `world_template` on the currently selected sphere.
 
 ### Backend
 

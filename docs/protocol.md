@@ -56,6 +56,14 @@
     {
       "type": "delete",
       "sphere_id": "sphere-old-001"
+    },
+    {
+      "type": "update_dimensions",
+      "sphere_id": "sphere-building-001",
+      "dimensions": {
+        "world_template": 1,
+        "world_scale": 0.75
+      }
     }
   ]
 }
@@ -68,6 +76,14 @@
   - `move` and `delete` operations require target spheres to exist.
 - If master commit cannot be applied, backend attempts to save same operations into the user's branch.
 - If user-branch save also fails validation, commit is rejected with `409`.
+
+## Dimension-driven world instancing
+
+- Sphere dimensions may include:
+  - `world_template` (numeric template ID)
+  - `world_scale` (optional numeric scale multiplier)
+- The backend stores these dimensions as normal sphere data.
+- The frontend expands template children client-side from these dimensions, so the server does not need to duplicate subworld child entities.
 
 ## WebSocket multiplayer messages
 

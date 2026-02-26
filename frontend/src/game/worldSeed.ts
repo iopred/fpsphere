@@ -51,6 +51,19 @@ const seedPayload: unknown[] = [
     timeWindow: { start: 0, end: null },
     tags: ["resource"],
   },
+  {
+    id: "sphere-world-instance-001",
+    parentId: "sphere-world-001",
+    radius: 12,
+    position3d: [18, -2, 14],
+    dimensions: {
+      money: 0.35,
+      world_template: 1,
+      world_scale: 1,
+    },
+    timeWindow: { start: 0, end: null },
+    tags: ["world-instance"],
+  },
 ];
 
 export function buildSeedWorld(): SeedWorld {

@@ -45,6 +45,10 @@ pub enum CommitOperation {
         sphere_id: String,
         position_3d: [f32; 3],
     },
+    UpdateDimensions {
+        sphere_id: String,
+        dimensions: BTreeMap<String, f32>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -270,6 +274,26 @@ fn apply_commit_operations(
 
                 entity.position_3d = *position_3d;
             }
+
+            CommitOperation::UpdateDimensions {
+                sphere_id,
+                dimensions,
+            } => {
+                let entity = world.entities.iter_mut().find(|item| item.id == *sphere_id);
+                let entity = match entity {
+                    Some(value) => value,
+                    None => {
+                        return Err(vec![format!(
+                            "update_dimensions failed: sphere '{}' does not exist",
+                            sphere_id
+                        )])
+                    }
+                };
+
+                for (key, value) in dimensions {
+                    entity.dimensions.insert(key.clone(), *value);
+                }
+            }
         }
     }
 
@@ -288,6 +312,11 @@ pub fn example_world_snapshot() -> WorldSnapshot {
 
     let mut resource_dimensions = BTreeMap::new();
     resource_dimensions.insert("money".to_string(), 1.0);
+
+    let mut world_instance_dimensions = BTreeMap::new();
+    world_instance_dimensions.insert("money".to_string(), 0.35);
+    world_instance_dimensions.insert("world_template".to_string(), 1.0);
+    world_instance_dimensions.insert("world_scale".to_string(), 1.0);
 
     WorldSnapshot {
         world_id: "world-main".to_string(),
@@ -340,6 +369,18 @@ pub fn example_world_snapshot() -> WorldSnapshot {
                     end_tick: None,
                 },
                 tags: vec!["resource".to_string()],
+            },
+            SphereEntity {
+                id: "sphere-world-instance-001".to_string(),
+                parent_id: Some("sphere-world-001".to_string()),
+                radius: 12.0,
+                position_3d: [18.0, -2.0, 14.0],
+                dimensions: world_instance_dimensions,
+                time_window: TimeWindow {
+                    start_tick: 0,
+                    end_tick: None,
+                },
+                tags: vec!["world-instance".to_string()],
             },
         ],
     }
@@ -490,5 +531,36 @@ mod tests {
             .entities
             .iter()
             .any(|item| item.id == "sphere-user-003" && item.position_3d == [9.0, 9.0, 9.0]));
+    }
+
+    #[test]
+    fn commit_can_update_dimensions() {
+        let mut repository = WorldRepository::new(example_world_snapshot());
+        let mut dimensions = BTreeMap::new();
+        dimensions.insert("world_template".to_string(), 1.0);
+        dimensions.insert("world_scale".to_string(), 0.5);
+
+        let response = repository
+            .commit(
+                "world-main",
+                CommitRequest {
+                    user_id: "alice".to_string(),
+                    base_tick: 0,
+                    operations: vec![CommitOperation::UpdateDimensions {
+                        sphere_id: "sphere-building-001".to_string(),
+                        dimensions,
+                    }],
+                },
+            )
+            .expect("commit should update dimensions");
+
+        let updated = response
+            .world
+            .entities
+            .iter()
+            .find(|item| item.id == "sphere-building-001")
+            .expect("updated sphere");
+        assert_eq!(updated.dimensions.get("world_template"), Some(&1.0));
+        assert_eq!(updated.dimensions.get("world_scale"), Some(&0.5));
     }
 }

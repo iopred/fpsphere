@@ -8,6 +8,12 @@ import {
   type PlayerBody,
 } from "./physics";
 import { KEYBINDINGS, matchesKeyBinding } from "./keybindings";
+import {
+  getAvailableSubworldTemplateIds,
+  instantiateSubworldChildren,
+  SUBWORLD_SCALE_DIMENSION,
+  SUBWORLD_TEMPLATE_DIMENSION,
+} from "./subworldTemplates";
 import { buildSeedWorld } from "./worldSeed";
 import {
   commitWorldChanges,
@@ -38,6 +44,7 @@ const CREATE_BOUNDARY_MARGIN = 0.35;
 const WORLD_ID = "world-main";
 const REMOTE_PLAYER_RADIUS = 0.9;
 const NETWORK_SEND_INTERVAL_TICKS = 2;
+const TEMPLATE_NONE_ID = 0;
 
 const tempForward = new THREE.Vector3();
 const tempOffset = new THREE.Vector3();
@@ -51,6 +58,13 @@ export class GameApp {
   private readonly hudNode: HTMLDivElement;
   private readonly hintNode: HTMLDivElement;
   private readonly crosshairNode: HTMLDivElement;
+  private readonly templateHudNode: HTMLDivElement;
+  private readonly createTemplateValueNode: HTMLSpanElement;
+  private readonly selectedTemplateValueNode: HTMLSpanElement;
+  private readonly createTemplateDecreaseButton: HTMLButtonElement;
+  private readonly createTemplateIncreaseButton: HTMLButtonElement;
+  private readonly selectedTemplateDecreaseButton: HTMLButtonElement;
+  private readonly selectedTemplateIncreaseButton: HTMLButtonElement;
 
   private readonly controller: FpsController;
   private readonly worldStore = new LocalWorldStore(buildSeedWorld());
@@ -75,6 +89,10 @@ export class GameApp {
   private readonly multiplayerClient = new MultiplayerClient();
   private readonly remotePlayers = new Map<string, RemotePlayerState>();
   private readonly remotePlayerMeshes = new Map<string, THREE.Mesh>();
+  private readonly templateIdChoices = [
+    TEMPLATE_NONE_ID,
+    ...getAvailableSubworldTemplateIds(),
+  ];
   private readonly raycaster = new THREE.Raycaster();
   private obstacles: ObstacleBody[] = [];
   private unsubscribeWorldStore: (() => void) | null = null;
@@ -83,6 +101,7 @@ export class GameApp {
   private lastCollisionCount = 0;
   private overlayEnabled = false;
   private editorMode = false;
+  private createTemplateId = this.templateIdChoices.includes(1) ? 1 : TEMPLATE_NONE_ID;
   private createdSphereCount = 0;
   private pendingCommitOperations: WorldCommitOperation[] = [];
   private saveInFlight = false;
@@ -113,12 +132,78 @@ export class GameApp {
     this.crosshairNode.className = "crosshair";
     this.mountNode.appendChild(this.crosshairNode);
 
+    this.templateHudNode = document.createElement("div");
+    this.templateHudNode.className = "template-hud";
+
+    const templateTitle = document.createElement("div");
+    templateTitle.className = "template-hud-title";
+    templateTitle.textContent = "Template IDs (0 = none)";
+    this.templateHudNode.appendChild(templateTitle);
+
+    const createRow = document.createElement("div");
+    createRow.className = "template-hud-row";
+    const createLabel = document.createElement("span");
+    createLabel.className = "template-hud-label";
+    createLabel.textContent = "Create";
+    createRow.appendChild(createLabel);
+
+    this.createTemplateDecreaseButton = document.createElement("button");
+    this.createTemplateDecreaseButton.type = "button";
+    this.createTemplateDecreaseButton.textContent = "-";
+    this.createTemplateDecreaseButton.addEventListener("click", () =>
+      this.adjustCreateTemplateId(-1),
+    );
+    createRow.appendChild(this.createTemplateDecreaseButton);
+
+    this.createTemplateValueNode = document.createElement("span");
+    this.createTemplateValueNode.className = "template-hud-value";
+    createRow.appendChild(this.createTemplateValueNode);
+
+    this.createTemplateIncreaseButton = document.createElement("button");
+    this.createTemplateIncreaseButton.type = "button";
+    this.createTemplateIncreaseButton.textContent = "+";
+    this.createTemplateIncreaseButton.addEventListener("click", () =>
+      this.adjustCreateTemplateId(1),
+    );
+    createRow.appendChild(this.createTemplateIncreaseButton);
+    this.templateHudNode.appendChild(createRow);
+
+    const selectedRow = document.createElement("div");
+    selectedRow.className = "template-hud-row";
+    const selectedLabel = document.createElement("span");
+    selectedLabel.className = "template-hud-label";
+    selectedLabel.textContent = "Selected";
+    selectedRow.appendChild(selectedLabel);
+
+    this.selectedTemplateDecreaseButton = document.createElement("button");
+    this.selectedTemplateDecreaseButton.type = "button";
+    this.selectedTemplateDecreaseButton.textContent = "-";
+    this.selectedTemplateDecreaseButton.addEventListener("click", () =>
+      this.adjustSelectedTemplateId(-1),
+    );
+    selectedRow.appendChild(this.selectedTemplateDecreaseButton);
+
+    this.selectedTemplateValueNode = document.createElement("span");
+    this.selectedTemplateValueNode.className = "template-hud-value";
+    selectedRow.appendChild(this.selectedTemplateValueNode);
+
+    this.selectedTemplateIncreaseButton = document.createElement("button");
+    this.selectedTemplateIncreaseButton.type = "button";
+    this.selectedTemplateIncreaseButton.textContent = "+";
+    this.selectedTemplateIncreaseButton.addEventListener("click", () =>
+      this.adjustSelectedTemplateId(1),
+    );
+    selectedRow.appendChild(this.selectedTemplateIncreaseButton);
+    this.templateHudNode.appendChild(selectedRow);
+    this.mountNode.appendChild(this.templateHudNode);
+
     this.controller = new FpsController(this.renderer.domElement);
 
     this.setupScene();
     this.connectMultiplayer();
     this.unsubscribeWorldStore = this.worldStore.subscribe(this.onWorldStoreChanged);
     this.updateHintText();
+    this.updateTemplateHud();
     this.recolorObstacles();
     void this.loadWorldFromBackend(WORLD_ID);
 
@@ -192,6 +277,7 @@ export class GameApp {
       center: new THREE.Vector3(entity.position3d[0], entity.position3d[1], entity.position3d[2]),
       radius: entity.radius,
       money: entity.dimensions.money ?? 0,
+      selectable: !entity.tags.includes("instanced-subworld"),
     };
   }
 
@@ -206,6 +292,7 @@ export class GameApp {
       parentMesh.position.copy(this.parentCenter);
     }
     this.syncObstaclesFromSnapshot(snapshot);
+    this.updateTemplateHud();
   };
 
   private async loadWorldFromBackend(worldId: string): Promise<void> {
@@ -313,10 +400,127 @@ export class GameApp {
     }
   }
 
+  private getSelectedEditableSphere(): SphereEntity | null {
+    const selectedSphereId = this.worldStore.getSelectedSphereId();
+    if (!selectedSphereId) {
+      return null;
+    }
+
+    return this.worldStore.getChildSphereById(selectedSphereId);
+  }
+
+  private readTemplateId(entity: SphereEntity | null): number {
+    if (!entity) {
+      return TEMPLATE_NONE_ID;
+    }
+
+    const value = entity.dimensions[SUBWORLD_TEMPLATE_DIMENSION];
+    if (!Number.isFinite(value)) {
+      return TEMPLATE_NONE_ID;
+    }
+
+    return Math.max(TEMPLATE_NONE_ID, Math.trunc(value));
+  }
+
+  private getTemplateChoiceIndex(templateId: number): number {
+    const exactIndex = this.templateIdChoices.indexOf(templateId);
+    if (exactIndex >= 0) {
+      return exactIndex;
+    }
+
+    let nearestIndex = 0;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < this.templateIdChoices.length; index += 1) {
+      const distance = Math.abs(this.templateIdChoices[index] - templateId);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = index;
+      }
+    }
+
+    return nearestIndex;
+  }
+
+  private stepTemplateId(currentTemplateId: number, delta: number): number {
+    const currentIndex = this.getTemplateChoiceIndex(currentTemplateId);
+    const nextIndex = Math.max(
+      0,
+      Math.min(this.templateIdChoices.length - 1, currentIndex + delta),
+    );
+    return this.templateIdChoices[nextIndex];
+  }
+
+  private adjustCreateTemplateId(delta: number): void {
+    this.createTemplateId = this.stepTemplateId(this.createTemplateId, delta);
+    this.updateTemplateHud();
+  }
+
+  private adjustSelectedTemplateId(delta: number): void {
+    if (!this.editorMode) {
+      return;
+    }
+
+    const selectedSphere = this.getSelectedEditableSphere();
+    if (!selectedSphere) {
+      return;
+    }
+
+    const currentTemplateId = this.readTemplateId(selectedSphere);
+    const nextTemplateId = this.stepTemplateId(currentTemplateId, delta);
+    if (nextTemplateId === currentTemplateId) {
+      return;
+    }
+
+    const changed = this.worldStore.apply({
+      type: "updateSphereDimensions",
+      sphereId: selectedSphere.id,
+      dimensions: {
+        [SUBWORLD_TEMPLATE_DIMENSION]: nextTemplateId,
+      },
+    });
+
+    if (!changed) {
+      return;
+    }
+
+    this.pendingCommitOperations.push({
+      type: "updateDimensions",
+      sphereId: selectedSphere.id,
+      dimensions: {
+        [SUBWORLD_TEMPLATE_DIMENSION]: nextTemplateId,
+      },
+    });
+    this.refreshPendingSaveMessage();
+    this.updateTemplateHud();
+  }
+
+  private updateTemplateHud(): void {
+    const selectedSphere = this.getSelectedEditableSphere();
+    const selectedTemplateId = this.readTemplateId(selectedSphere);
+
+    this.templateHudNode.classList.toggle("template-hud-disabled", !this.editorMode);
+    this.createTemplateValueNode.textContent = `${this.createTemplateId}`;
+    this.selectedTemplateValueNode.textContent = selectedSphere
+      ? `${selectedTemplateId}`
+      : "none";
+
+    const createEnabled = this.editorMode;
+    const selectedEnabled = this.editorMode && selectedSphere !== null;
+
+    this.createTemplateDecreaseButton.disabled = !createEnabled;
+    this.createTemplateIncreaseButton.disabled = !createEnabled;
+    this.selectedTemplateDecreaseButton.disabled = !selectedEnabled;
+    this.selectedTemplateIncreaseButton.disabled = !selectedEnabled;
+  }
+
   private syncObstaclesFromSnapshot(snapshot: WorldStoreSnapshot): void {
+    const expandedChildren = [
+      ...snapshot.children,
+      ...instantiateSubworldChildren(snapshot.children),
+    ];
     const nextIds = new Set<string>();
 
-    for (const entity of snapshot.children) {
+    for (const entity of expandedChildren) {
       nextIds.add(entity.id);
 
       const existingBody = this.obstacleBodiesById.get(entity.id);
@@ -496,6 +700,7 @@ export class GameApp {
     const obstacleMesh = new THREE.Mesh(sphereGeometry, sphereMaterial);
     obstacleMesh.position.copy(obstacle.center);
     obstacleMesh.userData.sphereId = obstacle.id;
+    obstacleMesh.userData.selectable = obstacle.selectable;
     this.scene.add(obstacleMesh);
     this.worldMeshes.set(obstacle.id, obstacleMesh);
     this.obstacleMeshes.set(obstacle.id, obstacleMesh);
@@ -694,6 +899,7 @@ export class GameApp {
       this.worldStore.apply({ type: "deselectSphere" });
     }
     this.updateHintText();
+    this.updateTemplateHud();
   }
 
   private createSphereInFrontOfPlayer(): void {
@@ -716,19 +922,30 @@ export class GameApp {
       }
     }
 
+    const dimensions: Record<string, number> = {
+      money: Math.random(),
+      [SUBWORLD_TEMPLATE_DIMENSION]: this.createTemplateId,
+    };
+    if (this.createTemplateId > TEMPLATE_NONE_ID) {
+      dimensions[SUBWORLD_SCALE_DIMENSION] = 1;
+    }
+
+    const tags = ["user-created"];
+    if (this.createTemplateId > TEMPLATE_NONE_ID) {
+      tags.push("world-instance");
+    }
+
     const sphere: SphereEntity = {
       id,
       parentId: this.parentSphere.id,
       radius: CREATED_SPHERE_RADIUS,
       position3d: [center.x, center.y, center.z],
-      dimensions: {
-        money: Math.random(),
-      },
+      dimensions,
       timeWindow: {
         start: this.tick,
         end: null,
       },
-      tags: ["user-created"],
+      tags,
     };
 
     const changed = this.worldStore.apply({
@@ -759,8 +976,16 @@ export class GameApp {
       return;
     }
 
-    const firstObject = intersections[0].object as THREE.Mesh;
-    const selectedId = firstObject.userData.sphereId;
+    const selectedIntersection = intersections.find((intersection) => {
+      const mesh = intersection.object as THREE.Mesh;
+      return mesh.userData.selectable !== false && typeof mesh.userData.sphereId === "string";
+    });
+    if (!selectedIntersection) {
+      return;
+    }
+
+    const selectedObject = selectedIntersection.object as THREE.Mesh;
+    const selectedId = selectedObject.userData.sphereId;
     if (typeof selectedId === "string") {
       this.worldStore.apply({
         type: "selectSphere",
@@ -792,7 +1017,7 @@ export class GameApp {
   private updateHintText(): void {
     if (this.editorMode) {
       this.hintNode.textContent =
-        "EDIT MODE | ~ exit | C create | E select looked-at | Q deselect | Z delete selected";
+        "EDIT MODE | ~ exit | C create sphere | E select looked-at | Q deselect | Z delete | template controls in HUD";
       return;
     }
 
@@ -811,6 +1036,7 @@ export class GameApp {
       `collisions: ${this.lastCollisionCount}\n` +
       `overlay: ${this.overlayEnabled ? "money (blue)" : "off"}\n` +
       `editor: ${this.editorMode ? "on" : "off"}\n` +
+      `create template: ${this.createTemplateId}\n` +
       `selected: ${selectedSphereId ?? "none"}\n` +
       `spheres: ${this.obstacles.length}\n` +
       `world source: ${this.worldSourceState}\n` +

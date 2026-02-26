@@ -342,6 +342,7 @@ Then merge for integration sprint:
 - [x] Add backend commit endpoint with master/user branch fallback.
 - [x] Add frontend save shortcut (`Cmd/Ctrl+S`) for commit submission.
 - [x] Add WebSocket multiplayer transport and remote player snapshots.
+- [x] Add client-side subworld instancing from sphere dimensions (`world_template`, `world_scale`).
 - [x] Implement editor mode toggle with `~`.
 - [x] Implement edit shortcuts in editor mode: `C`, `Q`, `E`, `Z`.
 - [x] Add layout-aware keybinding tests for Dvorak and QWERTY.

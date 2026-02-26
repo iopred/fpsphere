@@ -81,6 +81,23 @@ describe("LocalWorldStore", () => {
     expect(store.listChildSpheres().some((item) => item.id === targetId)).toBe(false);
   });
 
+  it("updates dimensions on a selected sphere", () => {
+    const store = new LocalWorldStore(buildSeedWorld());
+    const targetId = "sphere-building-001";
+
+    const changed = store.apply({
+      type: "updateSphereDimensions",
+      sphereId: targetId,
+      dimensions: {
+        world_template: 1,
+      },
+    });
+
+    expect(changed).toBe(true);
+    const updated = store.getChildSphereById(targetId);
+    expect(updated?.dimensions.world_template).toBe(1);
+  });
+
   it("emits change events with incrementing versions", () => {
     const store = new LocalWorldStore(buildSeedWorld());
     const versions: number[] = [];

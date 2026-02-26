@@ -26,6 +26,11 @@ Core entity contract: `SphereEntity`
 - `timeWindow: { start: number; end: number | null }`
 - `tags: string[]`
 
+Dimension conventions currently used:
+- `money`: overlay scalar for the blue SDF-style visualization.
+- `world_template`: numeric client-side template ID for subworld instancing.
+- `world_scale`: optional additional multiplier for template expansion.
+
 ## Tick and simulation semantics
 
 - Frontend runs fixed simulation ticks at 60 Hz.

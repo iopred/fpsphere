@@ -5,6 +5,7 @@ export interface ObstacleBody {
   center: THREE.Vector3;
   radius: number;
   money: number;
+  selectable: boolean;
 }
 
 export interface PlayerBody {
