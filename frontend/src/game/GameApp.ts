@@ -288,6 +288,7 @@ export class GameApp {
     const parentMesh = new THREE.Mesh(parentGeometry, parentMaterial);
     parentMesh.position.copy(this.parentCenter);
     parentMesh.scale.setScalar(this.parentSphere.radius);
+    parentMesh.visible = this.editorMode;
     this.scene.add(parentMesh);
     this.parentMesh = parentMesh;
 
@@ -1507,6 +1508,12 @@ export class GameApp {
         continue;
       }
 
+      if (obstacle.portalHost && !this.editorMode) {
+        obstacleMesh.visible = false;
+        continue;
+      }
+      obstacleMesh.visible = true;
+
       const baseColor = new THREE.Color(0x78849b);
       const overlayColor = new THREE.Color(0x2f7aff);
       const blend = this.overlayEnabled ? Math.max(0, Math.min(1, obstacle.money)) : 0;
@@ -1541,12 +1548,16 @@ export class GameApp {
 
   private toggleEditorMode(): void {
     this.editorMode = !this.editorMode;
+    if (this.parentMesh) {
+      this.parentMesh.visible = this.editorMode;
+    }
     if (!this.editorMode) {
       this.stopDraggingSphere();
       this.worldStore.apply({ type: "deselectSphere" });
     }
     this.updateHintText();
     this.updateTemplateHud();
+    this.recolorObstacles();
   }
 
   private nextCreatedSphereId(): string {
