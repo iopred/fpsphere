@@ -98,6 +98,30 @@ describe("LocalWorldStore", () => {
     expect(updated?.dimensions.world_template).toBe(1);
   });
 
+  it("updates sphere position and radius", () => {
+    const store = new LocalWorldStore(buildSeedWorld());
+    const targetId = "sphere-building-001";
+
+    expect(
+      store.apply({
+        type: "updateSpherePosition",
+        sphereId: targetId,
+        position3d: [5, -3, 11],
+      }),
+    ).toBe(true);
+    expect(
+      store.apply({
+        type: "updateSphereRadius",
+        sphereId: targetId,
+        radius: 4.5,
+      }),
+    ).toBe(true);
+
+    const updated = store.getChildSphereById(targetId);
+    expect(updated?.position3d).toEqual([5, -3, 11]);
+    expect(updated?.radius).toBe(4.5);
+  });
+
   it("emits change events with incrementing versions", () => {
     const store = new LocalWorldStore(buildSeedWorld());
     const versions: number[] = [];

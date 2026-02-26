@@ -49,6 +49,10 @@ pub enum CommitOperation {
         sphere_id: String,
         dimensions: BTreeMap<String, f32>,
     },
+    UpdateRadius {
+        sphere_id: String,
+        radius: f32,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -293,6 +297,28 @@ fn apply_commit_operations(
                 for (key, value) in dimensions {
                     entity.dimensions.insert(key.clone(), *value);
                 }
+            }
+
+            CommitOperation::UpdateRadius { sphere_id, radius } => {
+                if !radius.is_finite() || *radius <= 0.0 {
+                    return Err(vec![format!(
+                        "update_radius failed: radius must be > 0 for sphere '{}'",
+                        sphere_id
+                    )]);
+                }
+
+                let entity = world.entities.iter_mut().find(|item| item.id == *sphere_id);
+                let entity = match entity {
+                    Some(value) => value,
+                    None => {
+                        return Err(vec![format!(
+                            "update_radius failed: sphere '{}' does not exist",
+                            sphere_id
+                        )])
+                    }
+                };
+
+                entity.radius = *radius;
             }
         }
     }
@@ -562,5 +588,32 @@ mod tests {
             .expect("updated sphere");
         assert_eq!(updated.dimensions.get("world_template"), Some(&1.0));
         assert_eq!(updated.dimensions.get("world_scale"), Some(&0.5));
+    }
+
+    #[test]
+    fn commit_can_update_radius() {
+        let mut repository = WorldRepository::new(example_world_snapshot());
+
+        let response = repository
+            .commit(
+                "world-main",
+                CommitRequest {
+                    user_id: "alice".to_string(),
+                    base_tick: 0,
+                    operations: vec![CommitOperation::UpdateRadius {
+                        sphere_id: "sphere-building-001".to_string(),
+                        radius: 14.5,
+                    }],
+                },
+            )
+            .expect("commit should update radius");
+
+        let updated = response
+            .world
+            .entities
+            .iter()
+            .find(|item| item.id == "sphere-building-001")
+            .expect("updated sphere");
+        assert_eq!(updated.radius, 14.5);
     }
 }

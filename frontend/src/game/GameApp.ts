@@ -45,10 +45,15 @@ const WORLD_ID = "world-main";
 const REMOTE_PLAYER_RADIUS = 0.9;
 const NETWORK_SEND_INTERVAL_TICKS = 2;
 const TEMPLATE_NONE_ID = 0;
+const MIN_EDIT_RADIUS = 0.25;
+const MOUSE_WHEEL_RADIUS_STEP = 0.35;
+const DRAG_MIN_DISTANCE = 1.5;
 
 const tempForward = new THREE.Vector3();
 const tempOffset = new THREE.Vector3();
+const tempDragTarget = new THREE.Vector3();
 const tempRaycastPoint = new THREE.Vector2(0, 0);
+const tempLookEuler = new THREE.Euler(0, 0, 0, "YXZ");
 
 export class GameApp {
   private readonly scene = new THREE.Scene();
@@ -102,6 +107,8 @@ export class GameApp {
   private overlayEnabled = false;
   private editorMode = false;
   private createTemplateId = this.templateIdChoices.includes(1) ? 1 : TEMPLATE_NONE_ID;
+  private draggingSphereId: string | null = null;
+  private dragDistance = CREATE_DISTANCE;
   private createdSphereCount = 0;
   private pendingCommitOperations: WorldCommitOperation[] = [];
   private saveInFlight = false;
@@ -210,6 +217,11 @@ export class GameApp {
     window.addEventListener("resize", this.onResize);
     document.addEventListener("pointerlockchange", this.onPointerLockChange);
     document.addEventListener("keydown", this.onKeyDown);
+    document.addEventListener("wheel", this.onWheel, { passive: false });
+    document.addEventListener("mousedown", this.onMouseDown);
+    document.addEventListener("mouseup", this.onMouseUp);
+    document.addEventListener("contextmenu", this.onContextMenu);
+    window.addEventListener("blur", this.onWindowBlur);
   }
 
   start(): void {
@@ -234,6 +246,11 @@ export class GameApp {
     window.removeEventListener("resize", this.onResize);
     document.removeEventListener("pointerlockchange", this.onPointerLockChange);
     document.removeEventListener("keydown", this.onKeyDown);
+    document.removeEventListener("wheel", this.onWheel);
+    document.removeEventListener("mousedown", this.onMouseDown);
+    document.removeEventListener("mouseup", this.onMouseUp);
+    document.removeEventListener("contextmenu", this.onContextMenu);
+    window.removeEventListener("blur", this.onWindowBlur);
     this.renderer.dispose();
   }
 
@@ -282,6 +299,13 @@ export class GameApp {
   }
 
   private readonly onWorldStoreChanged = (snapshot: WorldStoreSnapshot): void => {
+    if (
+      this.draggingSphereId !== null &&
+      !snapshot.children.some((child) => child.id === this.draggingSphereId)
+    ) {
+      this.stopDraggingSphere();
+    }
+
     this.parentCenter.set(
       snapshot.parent.position3d[0],
       snapshot.parent.position3d[1],
@@ -400,6 +424,103 @@ export class GameApp {
     }
   }
 
+  private updatePendingCreateSphere(
+    sphereId: string,
+    update: (sphere: SphereEntity) => void,
+  ): boolean {
+    for (const operation of this.pendingCommitOperations) {
+      if (operation.type !== "create" || operation.sphere.id !== sphereId) {
+        continue;
+      }
+
+      update(operation.sphere);
+      return true;
+    }
+
+    return false;
+  }
+
+  private queueMoveOperation(sphereId: string, position3d: [number, number, number]): void {
+    if (
+      this.updatePendingCreateSphere(sphereId, (sphere) => {
+        sphere.position3d = [...position3d];
+      })
+    ) {
+      return;
+    }
+
+    for (let index = this.pendingCommitOperations.length - 1; index >= 0; index -= 1) {
+      const operation = this.pendingCommitOperations[index];
+      if (operation.type === "move" && operation.sphereId === sphereId) {
+        operation.position3d = [...position3d];
+        return;
+      }
+    }
+
+    this.pendingCommitOperations.push({
+      type: "move",
+      sphereId,
+      position3d: [...position3d],
+    });
+  }
+
+  private queueUpdateRadiusOperation(sphereId: string, radius: number): void {
+    if (
+      this.updatePendingCreateSphere(sphereId, (sphere) => {
+        sphere.radius = radius;
+      })
+    ) {
+      return;
+    }
+
+    for (let index = this.pendingCommitOperations.length - 1; index >= 0; index -= 1) {
+      const operation = this.pendingCommitOperations[index];
+      if (operation.type === "updateRadius" && operation.sphereId === sphereId) {
+        operation.radius = radius;
+        return;
+      }
+    }
+
+    this.pendingCommitOperations.push({
+      type: "updateRadius",
+      sphereId,
+      radius,
+    });
+  }
+
+  private queueUpdateDimensionsOperation(
+    sphereId: string,
+    dimensions: Record<string, number>,
+  ): void {
+    if (
+      this.updatePendingCreateSphere(sphereId, (sphere) => {
+        sphere.dimensions = {
+          ...sphere.dimensions,
+          ...dimensions,
+        };
+      })
+    ) {
+      return;
+    }
+
+    for (let index = this.pendingCommitOperations.length - 1; index >= 0; index -= 1) {
+      const operation = this.pendingCommitOperations[index];
+      if (operation.type === "updateDimensions" && operation.sphereId === sphereId) {
+        operation.dimensions = {
+          ...operation.dimensions,
+          ...dimensions,
+        };
+        return;
+      }
+    }
+
+    this.pendingCommitOperations.push({
+      type: "updateDimensions",
+      sphereId,
+      dimensions: { ...dimensions },
+    });
+  }
+
   private getSelectedEditableSphere(): SphereEntity | null {
     const selectedSphereId = this.worldStore.getSelectedSphereId();
     if (!selectedSphereId) {
@@ -483,12 +604,8 @@ export class GameApp {
       return;
     }
 
-    this.pendingCommitOperations.push({
-      type: "updateDimensions",
-      sphereId: selectedSphere.id,
-      dimensions: {
-        [SUBWORLD_TEMPLATE_DIMENSION]: nextTemplateId,
-      },
+    this.queueUpdateDimensionsOperation(selectedSphere.id, {
+      [SUBWORLD_TEMPLATE_DIMENSION]: nextTemplateId,
     });
     this.refreshPendingSaveMessage();
     this.updateTemplateHud();
@@ -512,6 +629,71 @@ export class GameApp {
     this.createTemplateIncreaseButton.disabled = !createEnabled;
     this.selectedTemplateDecreaseButton.disabled = !selectedEnabled;
     this.selectedTemplateIncreaseButton.disabled = !selectedEnabled;
+  }
+
+  private stopDraggingSphere(): void {
+    this.draggingSphereId = null;
+  }
+
+  private updateDraggedSphere(orientation: { yaw: number; pitch: number }): void {
+    if (!this.editorMode || !this.draggingSphereId) {
+      return;
+    }
+
+    const sphereId = this.draggingSphereId;
+    const selectedSphereId = this.worldStore.getSelectedSphereId();
+    if (selectedSphereId !== sphereId) {
+      this.stopDraggingSphere();
+      return;
+    }
+
+    const sphere = this.worldStore.getChildSphereById(sphereId);
+    if (!sphere) {
+      this.stopDraggingSphere();
+      return;
+    }
+
+    tempLookEuler.set(orientation.pitch, orientation.yaw, 0, "YXZ");
+    tempForward.set(0, 0, -1).applyEuler(tempLookEuler).normalize();
+    tempDragTarget.copy(this.player.position).addScaledVector(tempForward, this.dragDistance);
+
+    tempOffset.copy(tempDragTarget).sub(this.parentCenter);
+    const distanceFromCenter = tempOffset.length();
+    const maxDistance = Math.max(
+      DRAG_MIN_DISTANCE,
+      this.parentSphere.radius - sphere.radius - CREATE_BOUNDARY_MARGIN,
+    );
+    if (distanceFromCenter > maxDistance) {
+      if (distanceFromCenter > 1e-6) {
+        tempDragTarget
+          .copy(this.parentCenter)
+          .addScaledVector(tempOffset.normalize(), maxDistance);
+      } else {
+        tempDragTarget.set(
+          this.parentCenter.x,
+          this.parentCenter.y,
+          this.parentCenter.z + maxDistance,
+        );
+      }
+    }
+
+    const nextPosition: [number, number, number] = [
+      Number(tempDragTarget.x.toFixed(3)),
+      Number(tempDragTarget.y.toFixed(3)),
+      Number(tempDragTarget.z.toFixed(3)),
+    ];
+
+    const changed = this.worldStore.apply({
+      type: "updateSpherePosition",
+      sphereId,
+      position3d: nextPosition,
+    });
+    if (!changed) {
+      return;
+    }
+
+    this.queueMoveOperation(sphereId, nextPosition);
+    this.refreshPendingSaveMessage();
   }
 
   private syncObstaclesFromSnapshot(snapshot: WorldStoreSnapshot): void {
@@ -539,6 +721,7 @@ export class GameApp {
       const existingMesh = this.obstacleMeshes.get(entity.id);
       if (existingMesh) {
         existingMesh.position.copy(existingBody.center);
+        existingMesh.scale.setScalar(existingBody.radius);
       }
     }
 
@@ -692,7 +875,7 @@ export class GameApp {
   }
 
   private addObstacleMesh(obstacle: ObstacleBody): void {
-    const sphereGeometry = new THREE.SphereGeometry(obstacle.radius, 24, 18);
+    const sphereGeometry = new THREE.SphereGeometry(1, 24, 18);
     const sphereMaterial = new THREE.MeshStandardMaterial({
       color: 0x7082a1,
       roughness: 0.75,
@@ -700,6 +883,7 @@ export class GameApp {
     });
     const obstacleMesh = new THREE.Mesh(sphereGeometry, sphereMaterial);
     obstacleMesh.position.copy(obstacle.center);
+    obstacleMesh.scale.setScalar(obstacle.radius);
     obstacleMesh.userData.sphereId = obstacle.id;
     obstacleMesh.userData.selectable = obstacle.selectable;
     this.scene.add(obstacleMesh);
@@ -742,6 +926,105 @@ export class GameApp {
     this.hintNode.style.opacity = "1";
   };
 
+  private readonly onWheel = (event: WheelEvent): void => {
+    if (!this.editorMode) {
+      return;
+    }
+
+    if (event.target instanceof Node && this.templateHudNode.contains(event.target)) {
+      return;
+    }
+
+    const selectedSphere = this.getSelectedEditableSphere();
+    if (!selectedSphere) {
+      return;
+    }
+
+    const direction = event.deltaY < 0 ? 1 : -1;
+
+    event.preventDefault();
+    const maxRadius = Math.max(
+      MIN_EDIT_RADIUS,
+      this.parentSphere.radius - CREATE_BOUNDARY_MARGIN - PLAYER_RADIUS,
+    );
+    const nextRadius = Math.max(
+      MIN_EDIT_RADIUS,
+      Math.min(maxRadius, selectedSphere.radius + direction * MOUSE_WHEEL_RADIUS_STEP),
+    );
+    const roundedRadius = Number(nextRadius.toFixed(3));
+    if (roundedRadius === selectedSphere.radius) {
+      return;
+    }
+
+    const changed = this.worldStore.apply({
+      type: "updateSphereRadius",
+      sphereId: selectedSphere.id,
+      radius: roundedRadius,
+    });
+    if (!changed) {
+      return;
+    }
+
+    this.queueUpdateRadiusOperation(selectedSphere.id, roundedRadius);
+    this.refreshPendingSaveMessage();
+  };
+
+  private readonly onMouseDown = (event: MouseEvent): void => {
+    if (!this.editorMode || event.button !== 2) {
+      return;
+    }
+
+    if (!this.controller.isPointerLocked()) {
+      return;
+    }
+
+    if (event.target instanceof Node && this.templateHudNode.contains(event.target)) {
+      return;
+    }
+
+    if (!this.worldStore.getSelectedSphereId()) {
+      this.selectSphereAtReticle();
+    }
+
+    const selectedSphere = this.getSelectedEditableSphere();
+    if (!selectedSphere) {
+      this.stopDraggingSphere();
+      return;
+    }
+
+    event.preventDefault();
+    this.draggingSphereId = selectedSphere.id;
+    tempOffset
+      .set(selectedSphere.position3d[0], selectedSphere.position3d[1], selectedSphere.position3d[2])
+      .sub(this.player.position);
+    const maxDistance = Math.max(
+      DRAG_MIN_DISTANCE,
+      this.parentSphere.radius - selectedSphere.radius - CREATE_BOUNDARY_MARGIN,
+    );
+    this.dragDistance = Math.max(
+      DRAG_MIN_DISTANCE,
+      Math.min(maxDistance, tempOffset.length()),
+    );
+  };
+
+  private readonly onMouseUp = (event: MouseEvent): void => {
+    if (event.button !== 2) {
+      return;
+    }
+
+    this.stopDraggingSphere();
+  };
+
+  private readonly onContextMenu = (event: MouseEvent): void => {
+    if (this.editorMode && this.controller.isPointerLocked()) {
+      event.preventDefault();
+    }
+  };
+
+  private readonly onWindowBlur = (): void => {
+    this.stopDraggingSphere();
+  };
+
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
       event.preventDefault();
@@ -778,6 +1061,7 @@ export class GameApp {
 
     if (matchesKeyBinding(event, KEYBINDINGS.deselectSphere)) {
       event.preventDefault();
+      this.stopDraggingSphere();
       this.worldStore.apply({ type: "deselectSphere" });
       return;
     }
@@ -844,6 +1128,7 @@ export class GameApp {
 
     this.lastCollisionCount = resolveSphereCollisions(this.player, this.obstacles);
     constrainInsideParentSphere(this.player, this.parentCenter, this.parentSphere.radius);
+    this.updateDraggedSphere(orientation);
 
     if (this.tick - this.lastNetworkSendTick >= NETWORK_SEND_INTERVAL_TICKS) {
       const orientation = this.controller.getOrientation();
@@ -897,6 +1182,7 @@ export class GameApp {
   private toggleEditorMode(): void {
     this.editorMode = !this.editorMode;
     if (!this.editorMode) {
+      this.stopDraggingSphere();
       this.worldStore.apply({ type: "deselectSphere" });
     }
     this.updateHintText();
@@ -1001,6 +1287,10 @@ export class GameApp {
       return;
     }
 
+    if (this.draggingSphereId === selectedId) {
+      this.stopDraggingSphere();
+    }
+
     const changed = this.worldStore.apply({
       type: "deleteSphere",
       sphereId: selectedId,
@@ -1018,7 +1308,7 @@ export class GameApp {
   private updateHintText(): void {
     if (this.editorMode) {
       this.hintNode.textContent =
-        "EDIT MODE | ~ exit | C create sphere | E select looked-at | Q deselect | Z delete | template controls in HUD";
+        "EDIT MODE | ~ exit | C create | E select | Q deselect | Z delete | wheel resize | hold RMB drag";
       return;
     }
 
@@ -1037,6 +1327,7 @@ export class GameApp {
       `collisions: ${this.lastCollisionCount}\n` +
       `overlay: ${this.overlayEnabled ? "money (blue)" : "off"}\n` +
       `editor: ${this.editorMode ? "on" : "off"}\n` +
+      `dragging: ${this.draggingSphereId ?? "none"}\n` +
       `create template: ${this.createTemplateId}\n` +
       `selected: ${selectedSphereId ?? "none"}\n` +
       `spheres: ${this.obstacles.length}\n` +

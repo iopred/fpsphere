@@ -26,6 +26,16 @@ export type WorldEditCommand =
       type: "updateSphereDimensions";
       sphereId: string;
       dimensions: Record<string, number>;
+    }
+  | {
+      type: "updateSpherePosition";
+      sphereId: string;
+      position3d: [number, number, number];
+    }
+  | {
+      type: "updateSphereRadius";
+      sphereId: string;
+      radius: number;
     };
 
 export interface WorldStoreSnapshot {
@@ -214,6 +224,45 @@ export class LocalWorldStore {
         }
 
         sphere.dimensions = nextDimensions;
+        changed = true;
+        break;
+      }
+
+      case "updateSpherePosition": {
+        const sphere = this.childrenById.get(command.sphereId);
+        if (!sphere) {
+          return false;
+        }
+
+        const next = command.position3d;
+        const positionChanged =
+          sphere.position3d[0] !== next[0] ||
+          sphere.position3d[1] !== next[1] ||
+          sphere.position3d[2] !== next[2];
+        if (!positionChanged) {
+          return false;
+        }
+
+        sphere.position3d = [...next];
+        changed = true;
+        break;
+      }
+
+      case "updateSphereRadius": {
+        const sphere = this.childrenById.get(command.sphereId);
+        if (!sphere) {
+          return false;
+        }
+
+        if (!Number.isFinite(command.radius) || command.radius <= 0) {
+          return false;
+        }
+
+        if (sphere.radius === command.radius) {
+          return false;
+        }
+
+        sphere.radius = command.radius;
         changed = true;
         break;
       }

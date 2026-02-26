@@ -64,6 +64,11 @@
         "world_template": 1,
         "world_scale": 0.75
       }
+    },
+    {
+      "type": "update_radius",
+      "sphere_id": "sphere-building-001",
+      "radius": 6.5
     }
   ]
 }

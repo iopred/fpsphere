@@ -63,6 +63,11 @@ type BackendCommitOperation =
       type: "update_dimensions";
       sphere_id: string;
       dimensions: Record<string, number>;
+    }
+  | {
+      type: "update_radius";
+      sphere_id: string;
+      radius: number;
     };
 
 export interface LoadedWorld {
@@ -88,6 +93,11 @@ export type WorldCommitOperation =
       type: "updateDimensions";
       sphereId: string;
       dimensions: Record<string, number>;
+    }
+  | {
+      type: "updateRadius";
+      sphereId: string;
+      radius: number;
     };
 
 export interface CommitWorldParams {
@@ -193,6 +203,12 @@ function toBackendCommitOperation(operation: WorldCommitOperation): BackendCommi
         type: "update_dimensions",
         sphere_id: operation.sphereId,
         dimensions: operation.dimensions,
+      };
+    case "updateRadius":
+      return {
+        type: "update_radius",
+        sphere_id: operation.sphereId,
+        radius: operation.radius,
       };
     default:
       throw new Error("Unknown commit operation");

@@ -61,13 +61,18 @@ describe("worldApi", () => {
       const body = JSON.parse(String(init?.body));
       expect(body.user_id).toBe("user-1");
       expect(body.base_tick).toBe(4);
-      expect(body.operations).toHaveLength(3);
+      expect(body.operations).toHaveLength(4);
       expect(body.operations[0].type).toBe("create");
       expect(body.operations[1].type).toBe("delete");
       expect(body.operations[2]).toEqual({
         type: "update_dimensions",
         sphere_id: "sphere-keep-001",
         dimensions: { world_template: 1 },
+      });
+      expect(body.operations[3]).toEqual({
+        type: "update_radius",
+        sphere_id: "sphere-keep-001",
+        radius: 4.75,
       });
 
       const responsePayload = {
@@ -132,6 +137,11 @@ describe("worldApi", () => {
         type: "updateDimensions",
         sphereId: "sphere-keep-001",
         dimensions: { world_template: 1 },
+      },
+      {
+        type: "updateRadius",
+        sphereId: "sphere-keep-001",
+        radius: 4.75,
       },
     ];
 

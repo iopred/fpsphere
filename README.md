@@ -40,6 +40,9 @@ Initial implementation scaffold for:
 8. Template selector HUD:
    - Top-right HUD lets you pick the template id used by `C` create in editor mode.
    - The same HUD can change `world_template` on the currently selected sphere.
+9. Editor transform controls:
+   - Mouse wheel resizes the selected sphere radius.
+   - Hold right mouse button to drag the selected sphere along your view direction.
 
 ### Backend
 
