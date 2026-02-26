@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.app.json --noEmit"
+    "typecheck": "tsc -p tsconfig.app.json --noEmit",
+    "test:frontend": "vitest run tests/*.test.ts",
+    "test:keybindings": "vitest run tests/keybindings.test.ts"
   },
   "dependencies": {
     "@fpsphere/shared-types": "file:../packages/shared-types",
@@ -16,6 +18,7 @@
   "devDependencies": {
     "@types/three": "^0.181.0",
     "typescript": "^5.7.3",
-    "vite": "^7.1.11"
+    "vite": "^7.1.11",
+    "vitest": "^3.2.4"
   }
 }

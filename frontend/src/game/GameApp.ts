@@ -9,6 +9,8 @@ import {
 } from "./physics";
 import { KEYBINDINGS, matchesKeyBinding } from "./keybindings";
 import { buildSeedWorld } from "./worldSeed";
+import { fetchWorldSeed } from "./worldApi";
+import { LocalWorldStore, type WorldStoreSnapshot } from "./worldStore";
 
 const FIXED_STEP_SECONDS = 1 / 60;
 const MOVE_SPEED = 18;
@@ -36,9 +38,8 @@ export class GameApp {
   private readonly crosshairNode: HTMLDivElement;
 
   private readonly controller: FpsController;
-  private readonly world = buildSeedWorld();
-  private readonly parentSphere = this.world.parent;
-  private obstacles = this.buildObstacleBodies(this.world.children);
+  private readonly worldStore = new LocalWorldStore(buildSeedWorld());
+  private readonly parentSphere = this.worldStore.getParentSphere();
 
   private readonly parentCenter = new THREE.Vector3(
     this.parentSphere.position3d[0],
@@ -55,14 +56,17 @@ export class GameApp {
 
   private readonly worldMeshes = new Map<string, THREE.Mesh>();
   private readonly obstacleMeshes = new Map<string, THREE.Mesh>();
+  private readonly obstacleBodiesById = new Map<string, ObstacleBody>();
   private readonly raycaster = new THREE.Raycaster();
+  private obstacles: ObstacleBody[] = [];
+  private unsubscribeWorldStore: (() => void) | null = null;
   private accumulatorSeconds = 0;
   private tick = 0;
   private lastCollisionCount = 0;
   private overlayEnabled = false;
   private editorMode = false;
-  private selectedSphereId: string | null = null;
   private createdSphereCount = 0;
+  private worldSourceState: "seed" | "loading" | "backend" = "loading";
   private disposed = false;
 
   constructor(private readonly mountNode: HTMLDivElement) {
@@ -85,8 +89,10 @@ export class GameApp {
     this.controller = new FpsController(this.renderer.domElement);
 
     this.setupScene();
+    this.unsubscribeWorldStore = this.worldStore.subscribe(this.onWorldStoreChanged);
     this.updateHintText();
     this.recolorObstacles();
+    void this.loadWorldFromBackend("world-main");
 
     window.addEventListener("resize", this.onResize);
     document.addEventListener("pointerlockchange", this.onPointerLockChange);
@@ -106,6 +112,10 @@ export class GameApp {
     this.disposed = true;
     this.controller.disconnect();
     this.renderer.setAnimationLoop(null);
+    if (this.unsubscribeWorldStore) {
+      this.unsubscribeWorldStore();
+      this.unsubscribeWorldStore = null;
+    }
     window.removeEventListener("resize", this.onResize);
     document.removeEventListener("pointerlockchange", this.onPointerLockChange);
     document.removeEventListener("keydown", this.onKeyDown);
@@ -143,18 +153,121 @@ export class GameApp {
     this.scene.add(parentMesh);
     this.worldMeshes.set(this.parentSphere.id, parentMesh);
 
-    for (const obstacle of this.obstacles) {
-      this.addObstacleMesh(obstacle);
-    }
+    this.syncObstaclesFromSnapshot(this.worldStore.getSnapshot());
   }
 
-  private buildObstacleBodies(entities: SphereEntity[]): ObstacleBody[] {
-    return entities.map((entity) => ({
+  private buildObstacleBody(entity: SphereEntity): ObstacleBody {
+    return {
       id: entity.id,
       center: new THREE.Vector3(entity.position3d[0], entity.position3d[1], entity.position3d[2]),
       radius: entity.radius,
       money: entity.dimensions.money ?? 0,
-    }));
+    };
+  }
+
+  private readonly onWorldStoreChanged = (snapshot: WorldStoreSnapshot): void => {
+    this.parentCenter.set(
+      snapshot.parent.position3d[0],
+      snapshot.parent.position3d[1],
+      snapshot.parent.position3d[2],
+    );
+    const parentMesh = this.worldMeshes.get(this.parentSphere.id);
+    if (parentMesh) {
+      parentMesh.position.copy(this.parentCenter);
+    }
+    this.syncObstaclesFromSnapshot(snapshot);
+  };
+
+  private async loadWorldFromBackend(worldId: string): Promise<void> {
+    this.worldSourceState = "loading";
+
+    try {
+      const world = await fetchWorldSeed(worldId);
+      if (this.disposed) {
+        return;
+      }
+
+      const hydrated = this.worldStore.apply({
+        type: "hydrateWorld",
+        world,
+      });
+
+      this.worldSourceState = hydrated ? "backend" : "seed";
+    } catch (error) {
+      this.worldSourceState = "seed";
+      console.warn("Failed to load world from backend, using local seed world", error);
+    }
+  }
+
+  private syncObstaclesFromSnapshot(snapshot: WorldStoreSnapshot): void {
+    const nextIds = new Set<string>();
+
+    for (const entity of snapshot.children) {
+      nextIds.add(entity.id);
+
+      const existingBody = this.obstacleBodiesById.get(entity.id);
+      if (!existingBody) {
+        const body = this.buildObstacleBody(entity);
+        this.obstacleBodiesById.set(entity.id, body);
+        this.addObstacleMesh(body);
+        continue;
+      }
+
+      existingBody.center.set(entity.position3d[0], entity.position3d[1], entity.position3d[2]);
+      existingBody.radius = entity.radius;
+      existingBody.money = entity.dimensions.money ?? 0;
+
+      const existingMesh = this.obstacleMeshes.get(entity.id);
+      if (existingMesh) {
+        existingMesh.position.copy(existingBody.center);
+      }
+    }
+
+    for (const id of [...this.obstacleBodiesById.keys()]) {
+      if (nextIds.has(id)) {
+        continue;
+      }
+      this.removeObstacleById(id);
+    }
+
+    this.obstacles = [...this.obstacleBodiesById.values()];
+    this.recolorObstacles();
+  }
+
+  private addObstacleMesh(obstacle: ObstacleBody): void {
+    const sphereGeometry = new THREE.SphereGeometry(obstacle.radius, 24, 18);
+    const sphereMaterial = new THREE.MeshStandardMaterial({
+      color: 0x7082a1,
+      roughness: 0.75,
+      metalness: 0.08,
+    });
+    const obstacleMesh = new THREE.Mesh(sphereGeometry, sphereMaterial);
+    obstacleMesh.position.copy(obstacle.center);
+    obstacleMesh.userData.sphereId = obstacle.id;
+    this.scene.add(obstacleMesh);
+    this.worldMeshes.set(obstacle.id, obstacleMesh);
+    this.obstacleMeshes.set(obstacle.id, obstacleMesh);
+  }
+
+  private removeObstacleById(obstacleId: string): void {
+    this.obstacleBodiesById.delete(obstacleId);
+
+    const mesh = this.obstacleMeshes.get(obstacleId);
+    if (mesh) {
+      this.scene.remove(mesh);
+
+      mesh.geometry.dispose();
+      if (Array.isArray(mesh.material)) {
+        for (const material of mesh.material) {
+          material.dispose();
+        }
+      } else {
+        mesh.material.dispose();
+      }
+    }
+
+    this.obstacleMeshes.delete(obstacleId);
+    this.worldMeshes.delete(obstacleId);
   }
 
   private readonly onResize = (): void => {
@@ -201,8 +314,7 @@ export class GameApp {
 
     if (matchesKeyBinding(event, KEYBINDINGS.deselectSphere)) {
       event.preventDefault();
-      this.selectedSphereId = null;
-      this.recolorObstacles();
+      this.worldStore.apply({ type: "deselectSphere" });
       return;
     }
 
@@ -279,6 +391,8 @@ export class GameApp {
   }
 
   private recolorObstacles(): void {
+    const selectedSphereId = this.worldStore.getSelectedSphereId();
+
     for (const obstacle of this.obstacles) {
       const obstacleMesh = this.obstacleMeshes.get(obstacle.id);
       if (!obstacleMesh || !(obstacleMesh.material instanceof THREE.MeshStandardMaterial)) {
@@ -291,7 +405,7 @@ export class GameApp {
       obstacleMesh.material.color.copy(baseColor).lerp(overlayColor, blend);
       obstacleMesh.material.emissive.setHex(0x000000).lerp(new THREE.Color(0x103a8f), blend * 0.35);
 
-      const selected = obstacle.id === this.selectedSphereId;
+      const selected = obstacle.id === selectedSphereId;
       if (selected) {
         obstacleMesh.material.emissive.lerp(new THREE.Color(0xffae42), 0.75);
         obstacleMesh.material.roughness = 0.45;
@@ -308,25 +422,9 @@ export class GameApp {
   private toggleEditorMode(): void {
     this.editorMode = !this.editorMode;
     if (!this.editorMode) {
-      this.selectedSphereId = null;
-      this.recolorObstacles();
+      this.worldStore.apply({ type: "deselectSphere" });
     }
     this.updateHintText();
-  }
-
-  private addObstacleMesh(obstacle: ObstacleBody): void {
-    const sphereGeometry = new THREE.SphereGeometry(obstacle.radius, 24, 18);
-    const sphereMaterial = new THREE.MeshStandardMaterial({
-      color: 0x7082a1,
-      roughness: 0.75,
-      metalness: 0.08,
-    });
-    const obstacleMesh = new THREE.Mesh(sphereGeometry, sphereMaterial);
-    obstacleMesh.position.copy(obstacle.center);
-    obstacleMesh.userData.sphereId = obstacle.id;
-    this.scene.add(obstacleMesh);
-    this.worldMeshes.set(obstacle.id, obstacleMesh);
-    this.obstacleMeshes.set(obstacle.id, obstacleMesh);
   }
 
   private createSphereInFrontOfPlayer(): void {
@@ -349,24 +447,30 @@ export class GameApp {
       }
     }
 
-    const obstacle: ObstacleBody = {
-      id,
-      center,
-      radius: CREATED_SPHERE_RADIUS,
-      money: Math.random(),
-    };
-
-    this.obstacles.push(obstacle);
-    this.addObstacleMesh(obstacle);
-    this.selectedSphereId = id;
-    this.recolorObstacles();
+    this.worldStore.apply({
+      type: "createSphere",
+      selectCreated: true,
+      sphere: {
+        id,
+        parentId: this.parentSphere.id,
+        radius: CREATED_SPHERE_RADIUS,
+        position3d: [center.x, center.y, center.z],
+        dimensions: {
+          money: Math.random(),
+        },
+        timeWindow: {
+          start: this.tick,
+          end: null,
+        },
+        tags: ["user-created"],
+      },
+    });
   }
 
   private selectSphereAtReticle(): void {
     const meshes = [...this.obstacleMeshes.values()];
     if (meshes.length === 0) {
-      this.selectedSphereId = null;
-      this.recolorObstacles();
+      this.worldStore.apply({ type: "deselectSphere" });
       return;
     }
 
@@ -379,40 +483,23 @@ export class GameApp {
     const firstObject = intersections[0].object as THREE.Mesh;
     const selectedId = firstObject.userData.sphereId;
     if (typeof selectedId === "string") {
-      this.selectedSphereId = selectedId;
-      this.recolorObstacles();
+      this.worldStore.apply({
+        type: "selectSphere",
+        sphereId: selectedId,
+      });
     }
   }
 
   private deleteSelectedSphere(): void {
-    if (this.selectedSphereId === null) {
+    const selectedId = this.worldStore.getSelectedSphereId();
+    if (!selectedId) {
       return;
     }
 
-    const selectedId = this.selectedSphereId;
-    this.selectedSphereId = null;
-    this.obstacles = this.obstacles.filter((obstacle) => obstacle.id !== selectedId);
-
-    const selectedMesh = this.obstacleMeshes.get(selectedId);
-    if (selectedMesh) {
-      this.scene.remove(selectedMesh);
-
-      if (selectedMesh.geometry) {
-        selectedMesh.geometry.dispose();
-      }
-
-      if (Array.isArray(selectedMesh.material)) {
-        for (const material of selectedMesh.material) {
-          material.dispose();
-        }
-      } else {
-        selectedMesh.material.dispose();
-      }
-    }
-
-    this.obstacleMeshes.delete(selectedId);
-    this.worldMeshes.delete(selectedId);
-    this.recolorObstacles();
+    this.worldStore.apply({
+      type: "deleteSphere",
+      sphereId: selectedId,
+    });
   }
 
   private updateHintText(): void {
@@ -427,6 +514,8 @@ export class GameApp {
   }
 
   private updateHud(): void {
+    const selectedSphereId = this.worldStore.getSelectedSphereId();
+
     this.hudNode.textContent =
       `tick: ${this.tick}\n` +
       `position: ${this.player.position.x.toFixed(2)}, ${this.player.position.y.toFixed(2)}, ${this.player.position.z.toFixed(2)}\n` +
@@ -435,7 +524,8 @@ export class GameApp {
       `collisions: ${this.lastCollisionCount}\n` +
       `overlay: ${this.overlayEnabled ? "money (blue)" : "off"}\n` +
       `editor: ${this.editorMode ? "on" : "off"}\n` +
-      `selected: ${this.selectedSphereId ?? "none"}\n` +
-      `spheres: ${this.obstacles.length}`;
+      `selected: ${selectedSphereId ?? "none"}\n` +
+      `spheres: ${this.obstacles.length}\n` +
+      `world source: ${this.worldSourceState}`;
   }
 }

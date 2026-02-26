@@ -25,6 +25,9 @@ Initial implementation scaffold for:
    - `npm run dev:frontend`
 3. Open:
    - `http://localhost:5173`
+4. World data source:
+   - Frontend requests `/api/v1/world/world-main` via Vite proxy to `http://127.0.0.1:4000`.
+   - If backend is not running, client falls back to local seed data.
 
 ### Backend
 

@@ -195,7 +195,7 @@ Delivers: overlay module + example presets
 Depends on: B1, B2  
 Delivers: temporal query layer + tests
 
-### [ ] B5. Edit command model + local mutation pipeline
+### [x] B5. Edit command model + local mutation pipeline
 - Add command schema for `create/select/deselect/delete` editor actions.
 - Apply local datastore mutations with stable IDs and parent links.
 - Emit change events for renderer/physics resync.
@@ -338,7 +338,8 @@ Then merge for integration sprint:
 - [x] Implement minimum sphere world JSON seed.
 - [x] Implement local collision loop for player vs world spheres.
 - [x] Add overlay toggle for `money` dimension.
+- [x] Connect frontend world loading to backend snapshot endpoint.
 - [x] Implement editor mode toggle with `~`.
 - [x] Implement edit shortcuts in editor mode: `C`, `Q`, `E`, `Z`.
-- [ ] Add layout-aware keybinding tests for Dvorak and QWERTY.
+- [x] Add layout-aware keybinding tests for Dvorak and QWERTY.
 - [ ] Record M1 demo script and acceptance evidence.
