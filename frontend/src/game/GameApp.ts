@@ -80,7 +80,8 @@ export class GameApp {
   private readonly selectedTemplateIncreaseButton: HTMLButtonElement;
   private readonly levelSelectNode: HTMLDivElement;
   private readonly levelSelectStatusNode: HTMLDivElement;
-  private readonly levelSelectListNode: HTMLDivElement;
+  private readonly levelSelectDropdown: HTMLSelectElement;
+  private readonly levelRemoveButton: HTMLButtonElement;
   private readonly levelCreateInput: HTMLInputElement;
   private readonly levelCreateButton: HTMLButtonElement;
   private readonly levelSelectRefreshButton: HTMLButtonElement;
@@ -238,9 +239,25 @@ export class GameApp {
     this.levelSelectStatusNode.className = "level-select-status";
     this.levelSelectNode.appendChild(this.levelSelectStatusNode);
 
-    this.levelSelectListNode = document.createElement("div");
-    this.levelSelectListNode.className = "level-select-list";
-    this.levelSelectNode.appendChild(this.levelSelectListNode);
+    const levelSelectRow = document.createElement("div");
+    levelSelectRow.className = "level-select-row";
+
+    this.levelSelectDropdown = document.createElement("select");
+    this.levelSelectDropdown.className = "level-select-dropdown";
+    this.levelSelectDropdown.addEventListener("change", () => {
+      void this.selectWorldLevel(this.levelSelectDropdown.value);
+    });
+    levelSelectRow.appendChild(this.levelSelectDropdown);
+
+    this.levelRemoveButton = document.createElement("button");
+    this.levelRemoveButton.type = "button";
+    this.levelRemoveButton.className = "level-select-delete";
+    this.levelRemoveButton.textContent = "Remove";
+    this.levelRemoveButton.addEventListener("click", () => {
+      void this.deleteWorldLevelById(this.levelSelectDropdown.value);
+    });
+    levelSelectRow.appendChild(this.levelRemoveButton);
+    this.levelSelectNode.appendChild(levelSelectRow);
 
     const levelCreateRow = document.createElement("div");
     levelCreateRow.className = "level-select-create";
@@ -620,40 +637,19 @@ export class GameApp {
     const controlsDisabled = this.isLevelSelectBusy();
     this.levelCreateInput.disabled = controlsDisabled;
     this.levelCreateButton.disabled = controlsDisabled;
-
-    this.levelSelectListNode.textContent = "";
+    const selectedWorldId = this.availableWorldIds.includes(this.currentWorldId)
+      ? this.currentWorldId
+      : (this.availableWorldIds[0] ?? "");
+    this.levelSelectDropdown.textContent = "";
     for (const worldId of this.availableWorldIds) {
-      const row = document.createElement("div");
-      row.className = "level-select-row";
-
-      const selectButton = document.createElement("button");
-      selectButton.type = "button";
-      selectButton.className = "level-select-button";
-      selectButton.textContent = worldId;
-
-      const active = worldId === this.currentWorldId;
-      if (active) {
-        selectButton.classList.add("level-select-button-active");
-      }
-
-      selectButton.disabled = active || controlsDisabled;
-      selectButton.addEventListener("click", () => {
-        void this.selectWorldLevel(worldId);
-      });
-      row.appendChild(selectButton);
-
-      const removeButton = document.createElement("button");
-      removeButton.type = "button";
-      removeButton.className = "level-select-delete";
-      removeButton.textContent = "Remove";
-      removeButton.disabled = controlsDisabled || this.availableWorldIds.length <= 1;
-      removeButton.addEventListener("click", () => {
-        void this.deleteWorldLevelById(worldId);
-      });
-      row.appendChild(removeButton);
-
-      this.levelSelectListNode.appendChild(row);
+      const option = document.createElement("option");
+      option.value = worldId;
+      option.textContent = worldId;
+      this.levelSelectDropdown.appendChild(option);
     }
+    this.levelSelectDropdown.value = selectedWorldId;
+    this.levelSelectDropdown.disabled = controlsDisabled || this.availableWorldIds.length === 0;
+    this.levelRemoveButton.disabled = controlsDisabled || this.availableWorldIds.length <= 1;
 
     this.levelSelectRefreshButton.disabled = controlsDisabled;
   }
@@ -1645,6 +1641,35 @@ export class GameApp {
     );
   }
 
+  private isTypingTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof Element)) {
+      return false;
+    }
+
+    const editableElement = target.closest("input, textarea, select, [contenteditable]");
+    if (!editableElement) {
+      return false;
+    }
+
+    if (!(editableElement instanceof HTMLInputElement)) {
+      return true;
+    }
+
+    const inputType = editableElement.type.toLowerCase();
+    return ![
+      "button",
+      "checkbox",
+      "color",
+      "file",
+      "hidden",
+      "image",
+      "radio",
+      "range",
+      "reset",
+      "submit",
+    ].includes(inputType);
+  }
+
   private readonly onWheel = (event: WheelEvent): void => {
     if (!this.editorMode) {
       return;
@@ -1748,6 +1773,10 @@ export class GameApp {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
       event.preventDefault();
       void this.saveWorldCommit();
+      return;
+    }
+
+    if (this.isTypingTarget(event.target) || event.isComposing) {
       return;
     }
 

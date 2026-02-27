@@ -131,15 +131,6 @@ body,
   font-size: 11px;
 }
 
-.level-select-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: min(36vh, 280px);
-  overflow-y: auto;
-  padding-right: 2px;
-}
-
 .level-select-create {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -162,7 +153,16 @@ body,
   gap: 6px;
 }
 
-.level-select-button,
+.level-select-dropdown {
+  border: 1px solid rgba(104, 139, 229, 0.5);
+  background: rgba(15, 24, 39, 0.92);
+  color: #eaf1ff;
+  border-radius: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
 .level-select-refresh,
 .level-select-create-button,
 .level-select-delete {
@@ -172,15 +172,9 @@ body,
   border-radius: 6px;
   cursor: pointer;
   min-height: 28px;
-  text-align: left;
+  text-align: center;
   padding: 0 9px;
   font-size: 12px;
-}
-
-.level-select-button-active {
-  border-color: rgba(130, 176, 255, 0.9);
-  background: rgba(29, 47, 84, 0.95);
-  color: #f3f8ff;
 }
 
 .level-select-refresh {
@@ -193,6 +187,7 @@ body,
   min-width: 70px;
 }
 
+.level-select select:disabled,
 .level-select button:disabled {
   opacity: 0.45;
   cursor: default;
@@ -206,10 +201,6 @@ body,
     bottom: 12px;
     max-width: none;
     min-width: 0;
-  }
-
-  .level-select-list {
-    max-height: 24vh;
   }
 }
 
