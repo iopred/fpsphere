@@ -360,4 +360,4 @@ Then merge for integration sprint:
 - [x] Add AR marker viewer mode and QR marker print mode.
 - [x] Slim server/client payloads for commit success and multiplayer snapshots.
 - [x] Enforce backend leaf-only sphere delete semantics to preserve parent references.
-- [ ] Record M1 demo script and acceptance evidence.
+- [x] Record M1 demo script and acceptance evidence ([docs/sprint-1-closeout.md](docs/sprint-1-closeout.md)).

@@ -102,3 +102,4 @@ Current implementation includes:
     - commit success responses now include `commit_id`, `saved_to`, `reason`, and `world`.
     - multiplayer state snapshots include `world_id` and per-player `player_id`, `position_3d`, `yaw`, `pitch`.
   - Backend delete semantics now reject deleting non-leaf spheres (prevents orphaned parent references).
+  - Sprint 1 closeout artifact with acceptance evidence: [docs/sprint-1-closeout.md](docs/sprint-1-closeout.md).
