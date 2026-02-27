@@ -372,7 +372,7 @@ Goal: deliver authoritative multiplayer player movement with client prediction/r
 #### S2-A Backend Authority
 
 - [x] `S2-A1` Add fixed server simulation tick loop for connected players (60 Hz target).
-- [ ] `S2-A2` Introduce authoritative player-state store keyed by `world_id` + `player_id`.
+- [x] `S2-A2` Introduce authoritative player-state store keyed by `world_id` + `player_id`.
 - [ ] `S2-A3` Process queued client input by sequence/order (drop stale/duplicate input).
 - [ ] `S2-A4` Emit authoritative snapshots containing:
   - server tick

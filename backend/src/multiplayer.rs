@@ -67,9 +67,96 @@ pub enum ServerMultiplayerMessage {
     Pong,
 }
 
+#[derive(Default)]
+struct AuthoritativePlayerStore {
+    by_world: HashMap<String, HashMap<String, MultiplayerPlayerState>>,
+    world_by_player_id: HashMap<String, String>,
+}
+
+impl AuthoritativePlayerStore {
+    fn insert_player(&mut self, player: MultiplayerPlayerState) {
+        let world_id = player.world_id.clone();
+        let player_id = player.player_id.clone();
+
+        self.by_world
+            .entry(world_id.clone())
+            .or_default()
+            .insert(player_id.clone(), player);
+        self.world_by_player_id.insert(player_id, world_id);
+    }
+
+    fn set_player_identity(&mut self, player_id: &str, user_id: String) {
+        if let Some(player) = self.get_player_mut(player_id) {
+            player.user_id = user_id;
+        }
+    }
+
+    fn update_player_pose(
+        &mut self,
+        player_id: &str,
+        position_3d: [f32; 3],
+        yaw: f32,
+        pitch: f32,
+    ) -> bool {
+        let Some(player) = self.get_player_mut(player_id) else {
+            return false;
+        };
+
+        player.position_3d = position_3d;
+        player.yaw = yaw;
+        player.pitch = pitch;
+        true
+    }
+
+    fn remove_player(&mut self, player_id: &str) {
+        let Some(world_id) = self.world_by_player_id.remove(player_id) else {
+            return;
+        };
+
+        let Some(world_players) = self.by_world.get_mut(&world_id) else {
+            return;
+        };
+
+        world_players.remove(player_id);
+        if world_players.is_empty() {
+            self.by_world.remove(&world_id);
+        }
+    }
+
+    fn world_ids(&self) -> Vec<String> {
+        let mut ids = self.by_world.keys().cloned().collect::<Vec<_>>();
+        ids.sort();
+        ids
+    }
+
+    fn snapshots_for_world(&self, world_id: &str) -> Vec<MultiplayerPlayerSnapshot> {
+        let Some(players) = self.by_world.get(world_id) else {
+            return Vec::new();
+        };
+
+        let mut snapshots = players
+            .values()
+            .map(|item| MultiplayerPlayerSnapshot {
+                player_id: item.player_id.clone(),
+                position_3d: item.position_3d,
+                yaw: item.yaw,
+                pitch: item.pitch,
+            })
+            .collect::<Vec<_>>();
+
+        snapshots.sort_by(|a, b| a.player_id.cmp(&b.player_id));
+        snapshots
+    }
+
+    fn get_player_mut(&mut self, player_id: &str) -> Option<&mut MultiplayerPlayerState> {
+        let world_id = self.world_by_player_id.get(player_id)?.clone();
+        self.by_world.get_mut(&world_id)?.get_mut(player_id)
+    }
+}
+
 #[derive(Clone)]
 pub struct MultiplayerHub {
-    players: Arc<RwLock<HashMap<String, MultiplayerPlayerState>>>,
+    players: Arc<RwLock<AuthoritativePlayerStore>>,
     player_seq: Arc<AtomicU64>,
     tx: broadcast::Sender<ServerMultiplayerMessage>,
 }
@@ -78,7 +165,7 @@ impl MultiplayerHub {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(256);
         let hub = Self {
-            players: Arc::new(RwLock::new(HashMap::new())),
+            players: Arc::new(RwLock::new(AuthoritativePlayerStore::default())),
             player_seq: Arc::new(AtomicU64::new(0)),
             tx,
         };
@@ -109,14 +196,8 @@ impl MultiplayerHub {
 
     async fn broadcast_all_world_snapshots(&self) {
         let world_ids = {
-            let map = self.players.read().await;
-            let mut ids = map
-                .values()
-                .map(|item| item.world_id.clone())
-                .collect::<Vec<_>>();
-            ids.sort();
-            ids.dedup();
-            ids
+            let store = self.players.read().await;
+            store.world_ids()
         };
 
         for world_id in world_ids {
@@ -145,7 +226,7 @@ impl MultiplayerHub {
         self.players
             .write()
             .await
-            .insert(player_id, player_state.clone());
+            .insert_player(player_state.clone());
 
         player_state
     }
@@ -159,10 +240,10 @@ impl MultiplayerHub {
             return;
         }
 
-        let mut players = self.players.write().await;
-        if let Some(player) = players.get_mut(player_id) {
-            player.user_id = next_user_id;
-        }
+        self.players
+            .write()
+            .await
+            .set_player_identity(player_id, next_user_id);
     }
 
     pub async fn update_player(
@@ -173,37 +254,21 @@ impl MultiplayerHub {
         pitch: f32,
         _client_tick: u64,
     ) -> bool {
-        {
-            let mut players = self.players.write().await;
-            if let Some(player) = players.get_mut(player_id) {
-                player.position_3d = position_3d;
-                player.yaw = yaw;
-                player.pitch = pitch;
-                return true;
-            }
-        }
-        false
+        self.players
+            .write()
+            .await
+            .update_player_pose(player_id, position_3d, yaw, pitch)
     }
 
     pub async fn remove_player(&self, player_id: &str) {
-        self.players.write().await.remove(player_id);
+        self.players.write().await.remove_player(player_id);
     }
 
     pub async fn broadcast_world_snapshot(&self, world_id: &str) {
-        let mut players = {
-            let map = self.players.read().await;
-            map.values()
-                .filter(|item| item.world_id == world_id)
-                .map(|item| MultiplayerPlayerSnapshot {
-                    player_id: item.player_id.clone(),
-                    position_3d: item.position_3d,
-                    yaw: item.yaw,
-                    pitch: item.pitch,
-                })
-                .collect::<Vec<_>>()
+        let players = {
+            let store = self.players.read().await;
+            store.snapshots_for_world(world_id)
         };
-
-        players.sort_by(|a, b| a.player_id.cmp(&b.player_id));
 
         let _ = self.tx.send(ServerMultiplayerMessage::StateSnapshot {
             world_id: world_id.to_string(),
@@ -280,6 +345,49 @@ mod tests {
         assert!(
             result.is_ok(),
             "expected periodic state snapshot within 250ms"
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshots_are_scoped_by_world_store_key() {
+        let hub = MultiplayerHub::new();
+        let mut rx = hub.subscribe();
+
+        let main_player = hub
+            .add_player("user-a".to_string(), "world-main".to_string())
+            .await;
+        let other_player = hub
+            .add_player("user-b".to_string(), "world-beta".to_string())
+            .await;
+
+        let result = timeout(Duration::from_millis(300), async {
+            loop {
+                let received = rx.recv().await.expect("state snapshot message");
+                match received {
+                    ServerMultiplayerMessage::StateSnapshot { world_id, players } => {
+                        if world_id != "world-main" {
+                            continue;
+                        }
+
+                        let contains_main = players
+                            .iter()
+                            .any(|item| item.player_id == main_player.player_id);
+                        let contains_other = players
+                            .iter()
+                            .any(|item| item.player_id == other_player.player_id);
+                        assert!(contains_main);
+                        assert!(!contains_other);
+                        return;
+                    }
+                    _ => continue,
+                }
+            }
+        })
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "expected scoped world snapshot within 300ms"
         );
     }
 
