@@ -1835,10 +1835,14 @@ export class GameApp {
     if (this.player.grounded) {
       this.player.velocity.x = moveDirection.x * MOVE_SPEED;
       this.player.velocity.z = moveDirection.z * MOVE_SPEED;
-      this.player.velocity.multiplyScalar(1 / (1 + DRAG_GROUNDED * dt));
+      const groundedDragScale = 1 / (1 + DRAG_GROUNDED * dt);
+      this.player.velocity.x *= groundedDragScale;
+      this.player.velocity.z *= groundedDragScale;
       if (input.jump) {
         this.player.velocity.y = JUMP_SPEED;
         this.player.grounded = false;
+      } else {
+        this.player.velocity.y = 0;
       }
     } else {
       const targetX = moveDirection.x * MOVE_SPEED;
@@ -1848,7 +1852,9 @@ export class GameApp {
       this.player.velocity.multiplyScalar(1 / (1 + DRAG_AIR * dt));
     }
 
-    this.player.velocity.y -= GRAVITY * dt;
+    if (!this.player.grounded) {
+      this.player.velocity.y -= GRAVITY * dt;
+    }
     this.player.position.addScaledVector(this.player.velocity, dt);
 
     this.lastCollisionCount = resolveSphereCollisions(this.player, this.obstacles);

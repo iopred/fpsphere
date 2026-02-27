@@ -20,6 +20,7 @@ export interface PlayerBody {
 
 const scratchDelta = new THREE.Vector3();
 const scratchNormal = new THREE.Vector3();
+const GROUND_CONTACT_EPSILON = 0.02;
 
 export function constrainInsideParentSphere(
   player: PlayerBody,
@@ -67,6 +68,17 @@ export function resolveSphereCollisions(
     const minimumDistance = obstacle.radius + player.radius;
 
     if (distance >= minimumDistance) {
+      if (distance - minimumDistance <= GROUND_CONTACT_EPSILON) {
+        if (distance <= 1e-6) {
+          scratchNormal.set(0, 1, 0);
+        } else {
+          scratchNormal.copy(scratchDelta).divideScalar(distance);
+        }
+
+        if (scratchNormal.y > 0.45 && player.velocity.y <= 0) {
+          player.grounded = true;
+        }
+      }
       continue;
     }
 
