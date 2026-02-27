@@ -56,6 +56,20 @@ const TEMPLATE_NONE_ID = 0;
 const MIN_EDIT_RADIUS = 0.25;
 const MOUSE_WHEEL_RADIUS_STEP = 0.35;
 const DRAG_MIN_DISTANCE = 1.5;
+const SPHERE_COLOR_RED_DIMENSION = "r";
+const SPHERE_COLOR_GREEN_DIMENSION = "g";
+const SPHERE_COLOR_BLUE_DIMENSION = "b";
+const DEFAULT_SPHERE_COLOR_HEX = 0x78849b;
+const DEFAULT_SPHERE_COLOR = new THREE.Color(DEFAULT_SPHERE_COLOR_HEX);
+const DEFAULT_SPHERE_COLOR_RED = DEFAULT_SPHERE_COLOR.r;
+const DEFAULT_SPHERE_COLOR_GREEN = DEFAULT_SPHERE_COLOR.g;
+const DEFAULT_SPHERE_COLOR_BLUE = DEFAULT_SPHERE_COLOR.b;
+
+interface SphereColorChannels {
+  r: number;
+  g: number;
+  b: number;
+}
 
 const tempForward = new THREE.Vector3();
 const tempOffset = new THREE.Vector3();
@@ -78,6 +92,8 @@ export class GameApp {
   private readonly createTemplateIncreaseButton: HTMLButtonElement;
   private readonly selectedTemplateDecreaseButton: HTMLButtonElement;
   private readonly selectedTemplateIncreaseButton: HTMLButtonElement;
+  private readonly selectedColorRowNode: HTMLDivElement;
+  private readonly selectedColorInputNode: HTMLInputElement;
   private readonly levelSelectNode: HTMLDivElement;
   private readonly levelSelectStatusNode: HTMLDivElement;
   private readonly levelSelectDropdown: HTMLSelectElement;
@@ -225,6 +241,27 @@ export class GameApp {
     );
     selectedRow.appendChild(this.selectedTemplateIncreaseButton);
     this.templateHudNode.appendChild(selectedRow);
+
+    this.selectedColorRowNode = document.createElement("div");
+    this.selectedColorRowNode.className = "template-hud-color-row";
+
+    const selectedColorLabel = document.createElement("span");
+    selectedColorLabel.className = "template-hud-label";
+    selectedColorLabel.textContent = "Color";
+    this.selectedColorRowNode.appendChild(selectedColorLabel);
+
+    this.selectedColorInputNode = document.createElement("input");
+    this.selectedColorInputNode.type = "color";
+    this.selectedColorInputNode.className = "template-hud-color-input";
+    this.selectedColorInputNode.value = this.encodeColorInputValue({
+      r: DEFAULT_SPHERE_COLOR_RED,
+      g: DEFAULT_SPHERE_COLOR_GREEN,
+      b: DEFAULT_SPHERE_COLOR_BLUE,
+    });
+    this.selectedColorInputNode.addEventListener("input", this.onSelectedColorInput);
+    this.selectedColorRowNode.appendChild(this.selectedColorInputNode);
+    this.templateHudNode.appendChild(this.selectedColorRowNode);
+
     this.mountNode.appendChild(this.templateHudNode);
 
     this.levelSelectNode = document.createElement("div");
@@ -896,6 +933,81 @@ export class GameApp {
     });
   }
 
+  private readNormalizedColorChannel(value: unknown, fallback: number): number {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return fallback;
+    }
+
+    return Math.max(0, Math.min(1, value));
+  }
+
+  private readSphereColorChannels(entity: SphereEntity | null): SphereColorChannels {
+    return {
+      r: this.readNormalizedColorChannel(
+        entity?.dimensions[SPHERE_COLOR_RED_DIMENSION],
+        DEFAULT_SPHERE_COLOR_RED,
+      ),
+      g: this.readNormalizedColorChannel(
+        entity?.dimensions[SPHERE_COLOR_GREEN_DIMENSION],
+        DEFAULT_SPHERE_COLOR_GREEN,
+      ),
+      b: this.readNormalizedColorChannel(
+        entity?.dimensions[SPHERE_COLOR_BLUE_DIMENSION],
+        DEFAULT_SPHERE_COLOR_BLUE,
+      ),
+    };
+  }
+
+  private getDefaultColorDimensions(): Record<string, number> {
+    return {
+      [SPHERE_COLOR_RED_DIMENSION]: DEFAULT_SPHERE_COLOR_RED,
+      [SPHERE_COLOR_GREEN_DIMENSION]: DEFAULT_SPHERE_COLOR_GREEN,
+      [SPHERE_COLOR_BLUE_DIMENSION]: DEFAULT_SPHERE_COLOR_BLUE,
+    };
+  }
+
+  private setObstacleMeshColorChannels(
+    obstacleMesh: THREE.Mesh,
+    colorChannels: SphereColorChannels,
+  ): void {
+    obstacleMesh.userData.colorR = colorChannels.r;
+    obstacleMesh.userData.colorG = colorChannels.g;
+    obstacleMesh.userData.colorB = colorChannels.b;
+  }
+
+  private readObstacleMeshColorChannels(obstacleMesh: THREE.Mesh): SphereColorChannels {
+    return {
+      r: this.readNormalizedColorChannel(obstacleMesh.userData.colorR, DEFAULT_SPHERE_COLOR_RED),
+      g: this.readNormalizedColorChannel(obstacleMesh.userData.colorG, DEFAULT_SPHERE_COLOR_GREEN),
+      b: this.readNormalizedColorChannel(obstacleMesh.userData.colorB, DEFAULT_SPHERE_COLOR_BLUE),
+    };
+  }
+
+  private encodeColorInputValue(colorChannels: SphereColorChannels): string {
+    return `#${new THREE.Color(colorChannels.r, colorChannels.g, colorChannels.b).getHexString()}`;
+  }
+
+  private parseColorInputValue(inputValue: string): SphereColorChannels | null {
+    if (!/^#[\da-fA-F]{6}$/.test(inputValue)) {
+      return null;
+    }
+
+    const hex = Number.parseInt(inputValue.slice(1), 16);
+    return {
+      r: Number((((hex >> 16) & 0xff) / 255).toFixed(4)),
+      g: Number((((hex >> 8) & 0xff) / 255).toFixed(4)),
+      b: Number(((hex & 0xff) / 255).toFixed(4)),
+    };
+  }
+
+  private toColorDimensions(colorChannels: SphereColorChannels): Record<string, number> {
+    return {
+      [SPHERE_COLOR_RED_DIMENSION]: colorChannels.r,
+      [SPHERE_COLOR_GREEN_DIMENSION]: colorChannels.g,
+      [SPHERE_COLOR_BLUE_DIMENSION]: colorChannels.b,
+    };
+  }
+
   private getSelectedEditableSphere(): SphereEntity | null {
     const selectedSphereId = this.worldStore.getSelectedSphereId();
     if (!selectedSphereId) {
@@ -971,6 +1083,7 @@ export class GameApp {
         money: 0,
         [SUBWORLD_TEMPLATE_DIMENSION]: templateId,
         [SUBWORLD_SCALE_DIMENSION]: 1,
+        ...this.getDefaultColorDimensions(),
       },
       timeWindow: {
         start: this.tick,
@@ -1207,6 +1320,7 @@ export class GameApp {
   private updateTemplateHud(): void {
     const selectedSphere = this.getSelectedEditableSphere();
     const selectedTemplateId = this.readTemplateId(selectedSphere);
+    const selectedSphereColor = this.readSphereColorChannels(selectedSphere);
 
     this.templateHudNode.hidden = !this.editorMode;
     this.templateHudNode.classList.toggle("template-hud-disabled", !this.editorMode);
@@ -1222,6 +1336,9 @@ export class GameApp {
     this.createTemplateIncreaseButton.disabled = !createEnabled;
     this.selectedTemplateDecreaseButton.disabled = !selectedEnabled;
     this.selectedTemplateIncreaseButton.disabled = !selectedEnabled;
+    this.selectedColorRowNode.hidden = !selectedEnabled;
+    this.selectedColorInputNode.disabled = !selectedEnabled;
+    this.selectedColorInputNode.value = this.encodeColorInputValue(selectedSphereColor);
   }
 
   private movePlayerToCurrentWorld(): void {
@@ -1387,6 +1504,7 @@ export class GameApp {
       nextIds.add(entity.id);
       const instancedSubworld = entity.tags.includes("instanced-subworld");
       const templateId = entity.dimensions[SUBWORLD_TEMPLATE_DIMENSION];
+      const colorChannels = this.readSphereColorChannels(entity);
       const portalHost =
         entity.parentId === snapshot.parent.id &&
         Number.isFinite(templateId) &&
@@ -1405,7 +1523,7 @@ export class GameApp {
           selectable,
         );
         this.obstacleBodiesById.set(entity.id, body);
-        this.addObstacleMesh(body);
+        this.addObstacleMesh(body, colorChannels);
         continue;
       }
 
@@ -1424,6 +1542,7 @@ export class GameApp {
         existingMesh.userData.selectable = existingBody.selectable;
         existingMesh.userData.portalHost = existingBody.portalHost;
         existingMesh.userData.instancedSubworld = existingBody.instancedSubworld;
+        this.setObstacleMeshColorChannels(existingMesh, colorChannels);
       }
     }
 
@@ -1580,10 +1699,13 @@ export class GameApp {
     this.remotePlayers.clear();
   }
 
-  private addObstacleMesh(obstacle: ObstacleBody): void {
+  private addObstacleMesh(
+    obstacle: ObstacleBody,
+    colorChannels: SphereColorChannels,
+  ): void {
     const sphereGeometry = new THREE.SphereGeometry(1, 24, 18);
     const sphereMaterial = new THREE.MeshStandardMaterial({
-      color: 0x7082a1,
+      color: DEFAULT_SPHERE_COLOR_HEX,
       roughness: 0.75,
       metalness: 0.08,
     });
@@ -1594,6 +1716,7 @@ export class GameApp {
     obstacleMesh.userData.selectable = obstacle.selectable;
     obstacleMesh.userData.portalHost = obstacle.portalHost;
     obstacleMesh.userData.instancedSubworld = obstacle.instancedSubworld;
+    this.setObstacleMeshColorChannels(obstacleMesh, colorChannels);
     this.scene.add(obstacleMesh);
     this.worldMeshes.set(obstacle.id, obstacleMesh);
     this.obstacleMeshes.set(obstacle.id, obstacleMesh);
@@ -1669,6 +1792,35 @@ export class GameApp {
       "submit",
     ].includes(inputType);
   }
+
+  private readonly onSelectedColorInput = (): void => {
+    if (!this.editorMode) {
+      return;
+    }
+
+    const selectedSphere = this.getSelectedEditableSphere();
+    if (!selectedSphere) {
+      return;
+    }
+
+    const parsedColor = this.parseColorInputValue(this.selectedColorInputNode.value);
+    if (!parsedColor) {
+      return;
+    }
+
+    const dimensions = this.toColorDimensions(parsedColor);
+    const changed = this.worldStore.apply({
+      type: "updateSphereDimensions",
+      sphereId: selectedSphere.id,
+      dimensions,
+    });
+    if (!changed) {
+      return;
+    }
+
+    this.queueUpdateDimensionsOperation(selectedSphere.id, dimensions);
+    this.refreshPendingSaveMessage();
+  };
 
   private readonly onWheel = (event: WheelEvent): void => {
     if (!this.editorMode) {
@@ -1925,7 +2077,12 @@ export class GameApp {
       }
       obstacleMesh.visible = true;
 
-      const baseColor = new THREE.Color(0x78849b);
+      const baseColorChannels = this.readObstacleMeshColorChannels(obstacleMesh);
+      const baseColor = new THREE.Color(
+        baseColorChannels.r,
+        baseColorChannels.g,
+        baseColorChannels.b,
+      );
       const overlayColor = new THREE.Color(0x2f7aff);
       const blend = this.overlayEnabled ? Math.max(0, Math.min(1, obstacle.money)) : 0;
       obstacleMesh.material.color.copy(baseColor).lerp(overlayColor, blend);
@@ -2020,6 +2177,7 @@ export class GameApp {
     const dimensions: Record<string, number> = {
       money: Math.random(),
       [SUBWORLD_TEMPLATE_DIMENSION]: this.createTemplateId,
+      ...this.getDefaultColorDimensions(),
     };
     if (this.createTemplateId > TEMPLATE_NONE_ID) {
       dimensions[SUBWORLD_SCALE_DIMENSION] = 1;

@@ -70,6 +70,13 @@ body,
   gap: 6px;
 }
 
+.template-hud-color-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
 .template-hud-label {
   color: rgba(220, 231, 250, 0.9);
 }
@@ -94,6 +101,21 @@ body,
 }
 
 .template-hud button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.template-hud-color-input {
+  width: 44px;
+  height: 26px;
+  border: 1px solid rgba(104, 139, 229, 0.5);
+  border-radius: 6px;
+  background: rgba(15, 24, 39, 0.92);
+  padding: 1px;
+  cursor: pointer;
+}
+
+.template-hud-color-input:disabled {
   opacity: 0.45;
   cursor: default;
 }
