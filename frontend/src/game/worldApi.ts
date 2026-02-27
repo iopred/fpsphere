@@ -33,6 +33,10 @@ interface BackendCommitResponse {
   validation_errors: string[];
 }
 
+interface BackendWorldListResponse {
+  world_ids: string[];
+}
+
 interface BackendCommitError {
   status: string;
   message: string;
@@ -229,6 +233,38 @@ export async function fetchWorldSeed(
 
   const payload = (await response.json()) as BackendWorldSnapshot;
   return parseLoadedWorldSnapshot(payload);
+}
+
+export async function fetchAvailableWorldIds(): Promise<string[]> {
+  const response = await fetch("/api/v1/worlds");
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch available worlds (${response.status} ${response.statusText})`,
+    );
+  }
+
+  const payload = (await response.json()) as BackendWorldListResponse;
+  if (!Array.isArray(payload.world_ids)) {
+    throw new Error("Invalid world list payload: world_ids must be an array");
+  }
+
+  const uniqueWorldIds: string[] = [];
+  const seenWorldIds = new Set<string>();
+  for (const value of payload.world_ids) {
+    if (typeof value !== "string") {
+      continue;
+    }
+
+    const worldId = value.trim();
+    if (worldId.length === 0 || seenWorldIds.has(worldId)) {
+      continue;
+    }
+
+    seenWorldIds.add(worldId);
+    uniqueWorldIds.push(worldId);
+  }
+
+  return uniqueWorldIds;
 }
 
 export async function commitWorldChanges(

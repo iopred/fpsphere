@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   commitWorldChanges,
+  fetchAvailableWorldIds,
   fetchWorldSeed,
   WorldCommitError,
   type WorldCommitOperation,
@@ -180,5 +181,34 @@ describe("worldApi", () => {
         operations: [],
       }),
     ).rejects.toBeInstanceOf(WorldCommitError);
+  });
+
+  it("loads available world ids and deduplicates entries", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          world_ids: ["world-main", "world-beta", "world-main", " "],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }) as typeof globalThis.fetch;
+
+    await expect(fetchAvailableWorldIds()).resolves.toEqual(["world-main", "world-beta"]);
+  });
+
+  it("throws when available world ids payload shape is invalid", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(JSON.stringify({ world_ids: "world-main" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof globalThis.fetch;
+
+    await expect(fetchAvailableWorldIds()).rejects.toThrow(
+      "Invalid world list payload: world_ids must be an array",
+    );
   });
 });

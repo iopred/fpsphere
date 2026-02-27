@@ -4,6 +4,8 @@
 
 - `GET /healthz`
   - response: service status
+- `GET /api/v1/worlds`
+  - response: `{ "world_ids": string[] }`
 - `GET /api/v1/world/:world_id`
   - response: `WorldSnapshot`
 - `GET /api/v1/world/:world_id?user_id=<id>`

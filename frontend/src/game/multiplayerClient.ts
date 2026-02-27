@@ -110,6 +110,10 @@ export class MultiplayerClient {
     this.callbacks.onStatus("connecting");
 
     socket.onopen = () => {
+      if (this.socket !== socket) {
+        return;
+      }
+
       this.callbacks?.onStatus("connected");
       this.send({
         type: "hello",
@@ -119,6 +123,10 @@ export class MultiplayerClient {
     };
 
     socket.onmessage = (event: MessageEvent<string>) => {
+      if (this.socket !== socket) {
+        return;
+      }
+
       if (typeof event.data !== "string") {
         return;
       }
@@ -152,14 +160,20 @@ export class MultiplayerClient {
     };
 
     socket.onerror = () => {
+      if (this.socket !== socket) {
+        return;
+      }
+
       this.callbacks?.onStatus("error");
     };
 
     socket.onclose = () => {
-      this.callbacks?.onStatus("disconnected");
-      if (this.socket === socket) {
-        this.socket = null;
+      if (this.socket !== socket) {
+        return;
       }
+
+      this.callbacks?.onStatus("disconnected");
+      this.socket = null;
     };
   }
 

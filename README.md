@@ -67,9 +67,11 @@ Initial implementation scaffold for:
    - `http://127.0.0.1:4000/healthz`
 4. Example world snapshot:
    - `http://127.0.0.1:4000/api/v1/world/world-main`
-5. Commit endpoint:
+5. Available worlds:
+   - `http://127.0.0.1:4000/api/v1/worlds`
+6. Commit endpoint:
    - `POST http://127.0.0.1:4000/api/v1/world/world-main/commit`
-6. Multiplayer endpoint:
+7. Multiplayer endpoint:
    - `ws://127.0.0.1:4000/ws?user_id=<id>&world_id=world-main`
 
 ## Current milestone status

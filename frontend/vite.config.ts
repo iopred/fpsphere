@@ -12,6 +12,6 @@ export default defineConfig({
         ws: true,
       },
     },
-    allowedHosts: ["localhost", "easy-enters-commonly-pool.trycloudflare.com"],
+    allowedHosts: ["localhost", "believe-ringtones-arg-executive.trycloudflare.com"],
   },
 });

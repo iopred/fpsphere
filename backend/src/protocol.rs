@@ -135,6 +135,10 @@ impl WorldRepository {
         Some(self.master.clone())
     }
 
+    pub fn list_world_ids(&self) -> Vec<String> {
+        vec![self.master.world_id.clone()]
+    }
+
     pub fn commit(
         &mut self,
         world_id: &str,
@@ -517,6 +521,12 @@ mod tests {
             },
             tags: vec!["test".to_string()],
         }
+    }
+
+    #[test]
+    fn list_world_ids_returns_master_world() {
+        let repository = WorldRepository::new(example_world_snapshot());
+        assert_eq!(repository.list_world_ids(), vec!["world-main".to_string()]);
     }
 
     #[test]

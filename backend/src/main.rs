@@ -48,6 +48,11 @@ struct CommitErrorResponse {
     validation_errors: Vec<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct WorldListResponse {
+    world_ids: Vec<String>,
+}
+
 #[tokio::main]
 async fn main() {
     let _ = dotenvy::from_filename(".env");
@@ -69,6 +74,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/healthz", get(health))
+        .route("/api/v1/worlds", get(list_worlds))
         .route("/api/v1/world/{world_id}", get(get_world_snapshot))
         .route("/api/v1/world/{world_id}/commit", post(commit_world))
         .route("/ws", get(ws_handler))
@@ -93,6 +99,13 @@ async fn health() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok",
         service: "fpsphere-backend",
+    })
+}
+
+async fn list_worlds(State(state): State<AppState>) -> Json<WorldListResponse> {
+    let repository = state.repository.read().await;
+    Json(WorldListResponse {
+        world_ids: repository.list_world_ids(),
     })
 }
 

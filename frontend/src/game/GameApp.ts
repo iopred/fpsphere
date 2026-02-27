@@ -22,6 +22,7 @@ import {
 import { buildSeedWorld } from "./worldSeed";
 import {
   commitWorldChanges,
+  fetchAvailableWorldIds,
   fetchWorldSeed,
   parseLoadedWorldSnapshot,
   type WorldCommitOperation,
@@ -46,7 +47,7 @@ const DRAG_AIR = 0.8;
 const CREATED_SPHERE_RADIUS = 2.4;
 const CREATE_DISTANCE = 8;
 const CREATE_BOUNDARY_MARGIN = 0.35;
-const WORLD_ID = "world-main";
+const DEFAULT_WORLD_ID = "world-main";
 const REMOTE_PLAYER_RADIUS = 0.9;
 const NETWORK_SEND_INTERVAL_TICKS = 2;
 const TEMPLATE_NONE_ID = 0;
@@ -75,6 +76,10 @@ export class GameApp {
   private readonly createTemplateIncreaseButton: HTMLButtonElement;
   private readonly selectedTemplateDecreaseButton: HTMLButtonElement;
   private readonly selectedTemplateIncreaseButton: HTMLButtonElement;
+  private readonly levelSelectNode: HTMLDivElement;
+  private readonly levelSelectStatusNode: HTMLDivElement;
+  private readonly levelSelectListNode: HTMLDivElement;
+  private readonly levelSelectRefreshButton: HTMLButtonElement;
 
   private readonly controller: FpsController;
   private readonly worldStore = new LocalWorldStore(buildSeedWorld());
@@ -121,6 +126,10 @@ export class GameApp {
   private saveMessage = "no pending edits";
   private backendWorldTick = 0;
   private readonly userId = this.getOrCreateUserId();
+  private currentWorldId = DEFAULT_WORLD_ID;
+  private availableWorldIds = [DEFAULT_WORLD_ID];
+  private loadingWorldId: string | null = null;
+  private worldLoadVersion = 0;
   private localPlayerId: string | null = null;
   private multiplayerStatus = "disconnected";
   private multiplayerError: string | null = null;
@@ -211,15 +220,47 @@ export class GameApp {
     this.templateHudNode.appendChild(selectedRow);
     this.mountNode.appendChild(this.templateHudNode);
 
+    this.levelSelectNode = document.createElement("div");
+    this.levelSelectNode.className = "level-select";
+
+    const levelSelectTitle = document.createElement("div");
+    levelSelectTitle.className = "level-select-title";
+    levelSelectTitle.textContent = "Level Select";
+    this.levelSelectNode.appendChild(levelSelectTitle);
+
+    this.levelSelectStatusNode = document.createElement("div");
+    this.levelSelectStatusNode.className = "level-select-status";
+    this.levelSelectNode.appendChild(this.levelSelectStatusNode);
+
+    this.levelSelectListNode = document.createElement("div");
+    this.levelSelectListNode.className = "level-select-list";
+    this.levelSelectNode.appendChild(this.levelSelectListNode);
+
+    this.levelSelectRefreshButton = document.createElement("button");
+    this.levelSelectRefreshButton.type = "button";
+    this.levelSelectRefreshButton.className = "level-select-refresh";
+    this.levelSelectRefreshButton.textContent = "Refresh";
+    this.levelSelectRefreshButton.addEventListener("click", () => {
+      void this.refreshAvailableWorldIds();
+    });
+    this.levelSelectNode.appendChild(this.levelSelectRefreshButton);
+    this.mountNode.appendChild(this.levelSelectNode);
+
+    const queryWorldId = new URLSearchParams(window.location.search).get("world");
+    if (queryWorldId && queryWorldId.trim().length > 0) {
+      this.currentWorldId = queryWorldId.trim();
+      this.availableWorldIds = [this.currentWorldId];
+    }
+
     this.controller = new FpsController(this.renderer.domElement);
 
     this.setupScene();
-    this.connectMultiplayer();
     this.unsubscribeWorldStore = this.worldStore.subscribe(this.onWorldStoreChanged);
     this.updateHintText();
     this.updateTemplateHud();
+    this.updateLevelSelectHud();
     this.recolorObstacles();
-    void this.loadWorldFromBackend(WORLD_ID);
+    void this.initializeLevelSelection();
 
     window.addEventListener("resize", this.onResize);
     document.addEventListener("pointerlockchange", this.onPointerLockChange);
@@ -337,12 +378,134 @@ export class GameApp {
     this.updateTemplateHud();
   };
 
-  private async loadWorldFromBackend(worldId: string): Promise<void> {
+  private async initializeLevelSelection(): Promise<void> {
+    await this.refreshAvailableWorldIds();
+    await this.selectWorldLevel(this.currentWorldId, true);
+  }
+
+  private normalizeWorldIds(worldIds: string[]): string[] {
+    const normalizedWorldIds: string[] = [];
+    const seenWorldIds = new Set<string>();
+
+    for (const value of worldIds) {
+      const worldId = value.trim();
+      if (worldId.length === 0 || seenWorldIds.has(worldId)) {
+        continue;
+      }
+
+      seenWorldIds.add(worldId);
+      normalizedWorldIds.push(worldId);
+    }
+
+    return normalizedWorldIds;
+  }
+
+  private async refreshAvailableWorldIds(): Promise<void> {
+    this.levelSelectRefreshButton.disabled = true;
+
+    try {
+      const fetchedWorldIds = await fetchAvailableWorldIds();
+      if (this.disposed) {
+        return;
+      }
+
+      const normalizedWorldIds = this.normalizeWorldIds(fetchedWorldIds);
+      this.availableWorldIds =
+        normalizedWorldIds.length > 0
+          ? normalizedWorldIds
+          : this.normalizeWorldIds([this.currentWorldId, ...this.availableWorldIds]);
+    } catch (error) {
+      console.warn("Failed to fetch world list", error);
+      this.availableWorldIds = this.normalizeWorldIds([this.currentWorldId, ...this.availableWorldIds]);
+    } finally {
+      if (!this.disposed) {
+        this.availableWorldIds = this.normalizeWorldIds([this.currentWorldId, ...this.availableWorldIds]);
+        this.updateLevelSelectHud();
+      }
+    }
+  }
+
+  private updateWorldQueryParam(worldId: string): void {
+    const url = new URL(window.location.href);
+    url.searchParams.set("world", worldId);
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  private async selectWorldLevel(worldIdInput: string, force: boolean = false): Promise<void> {
+    const worldId = worldIdInput.trim();
+    if (worldId.length === 0) {
+      return;
+    }
+
+    if (!force && worldId === this.currentWorldId && this.loadingWorldId === null) {
+      return;
+    }
+
+    const requestVersion = this.worldLoadVersion + 1;
+    this.worldLoadVersion = requestVersion;
+    this.loadingWorldId = worldId;
+    this.currentWorldId = worldId;
+    this.availableWorldIds = this.normalizeWorldIds([worldId, ...this.availableWorldIds]);
+    this.pendingCommitOperations = [];
+    this.refreshPendingSaveMessage();
+    this.saveMessage = `loading level "${worldId}"...`;
+    this.stopDraggingSphere();
+    this.worldStore.apply({ type: "deselectSphere" });
+    this.updateWorldQueryParam(worldId);
+    this.updateLevelSelectHud();
+    this.connectMultiplayer(worldId);
+
+    await this.loadWorldFromBackend(worldId, requestVersion);
+    if (this.disposed || requestVersion !== this.worldLoadVersion) {
+      return;
+    }
+
+    this.loadingWorldId = null;
+    this.movePlayerToCurrentWorld();
+    this.updateLevelSelectHud();
+  }
+
+  private updateLevelSelectHud(): void {
+    this.levelSelectNode.hidden = !this.editorMode;
+    if (!this.editorMode) {
+      return;
+    }
+
+    if (this.loadingWorldId) {
+      this.levelSelectStatusNode.textContent = `Loading "${this.loadingWorldId}"...`;
+    } else {
+      this.levelSelectStatusNode.textContent = `Current: ${this.currentWorldId}`;
+    }
+
+    this.levelSelectListNode.textContent = "";
+    for (const worldId of this.availableWorldIds) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "level-select-button";
+      button.textContent = worldId;
+
+      const active = worldId === this.currentWorldId;
+      if (active) {
+        button.classList.add("level-select-button-active");
+      }
+
+      button.disabled = active || this.loadingWorldId !== null || this.saveInFlight;
+      button.addEventListener("click", () => {
+        void this.selectWorldLevel(worldId);
+      });
+      this.levelSelectListNode.appendChild(button);
+    }
+
+    this.levelSelectRefreshButton.disabled = this.loadingWorldId !== null || this.saveInFlight;
+  }
+
+  private async loadWorldFromBackend(worldId: string, requestVersion: number): Promise<void> {
     this.worldSourceState = "loading";
+    this.updateLevelSelectHud();
 
     try {
       const loadedWorld = await fetchWorldSeed(worldId, this.userId);
-      if (this.disposed) {
+      if (this.disposed || requestVersion !== this.worldLoadVersion) {
         return;
       }
 
@@ -355,8 +518,21 @@ export class GameApp {
       this.pendingCommitOperations = [];
       this.refreshPendingSaveMessage();
       this.worldSourceState = hydrated ? "backend" : "seed";
+      this.saveMessage = `loaded level "${worldId}"`;
     } catch (error) {
+      if (this.disposed || requestVersion !== this.worldLoadVersion) {
+        return;
+      }
+
+      this.worldStore.apply({
+        type: "hydrateWorld",
+        world: buildSeedWorld(),
+      });
+      this.backendWorldTick = 0;
+      this.pendingCommitOperations = [];
+      this.refreshPendingSaveMessage();
       this.worldSourceState = "seed";
+      this.saveMessage = `load failed for "${worldId}", using seed fallback`;
       console.warn("Failed to load world from backend, using local seed world", error);
     }
   }
@@ -386,10 +562,11 @@ export class GameApp {
 
     this.saveInFlight = true;
     this.saveMessage = `saving ${this.pendingCommitOperations.length} edit(s)...`;
+    this.updateLevelSelectHud();
 
     try {
       const response = await commitWorldChanges({
-        worldId: WORLD_ID,
+        worldId: this.currentWorldId,
         userId: this.userId,
         baseTick: this.backendWorldTick,
         operations: this.pendingCommitOperations,
@@ -419,6 +596,7 @@ export class GameApp {
       }
     } finally {
       this.saveInFlight = false;
+      this.updateLevelSelectHud();
     }
   }
 
@@ -1103,10 +1281,14 @@ export class GameApp {
     this.recolorObstacles();
   }
 
-  private connectMultiplayer(): void {
+  private connectMultiplayer(worldId: string): void {
+    this.localPlayerId = null;
+    this.multiplayerError = null;
+    this.clearRemotePlayers();
+
     this.multiplayerClient.connect({
       userId: this.userId,
-      worldId: WORLD_ID,
+      worldId,
       callbacks: {
         onStatus: (status) => {
           this.multiplayerStatus = status;
@@ -1133,7 +1315,7 @@ export class GameApp {
   }
 
   private applyMultiplayerSnapshot(snapshot: MultiplayerSnapshot): void {
-    if (snapshot.world_id !== WORLD_ID) {
+    if (snapshot.world_id !== this.currentWorldId) {
       return;
     }
 
@@ -1158,7 +1340,7 @@ export class GameApp {
   }
 
   private applyMultiplayerWorldCommit(commit: MultiplayerWorldCommit): void {
-    if (commit.world_id !== WORLD_ID) {
+    if (commit.world_id !== this.currentWorldId) {
       return;
     }
 
@@ -1295,12 +1477,19 @@ export class GameApp {
     this.hintNode.style.opacity = "1";
   };
 
+  private isEditorHudTarget(target: EventTarget | null): boolean {
+    return (
+      target instanceof Node &&
+      (this.templateHudNode.contains(target) || this.levelSelectNode.contains(target))
+    );
+  }
+
   private readonly onWheel = (event: WheelEvent): void => {
     if (!this.editorMode) {
       return;
     }
 
-    if (event.target instanceof Node && this.templateHudNode.contains(event.target)) {
+    if (this.isEditorHudTarget(event.target)) {
       return;
     }
 
@@ -1347,7 +1536,7 @@ export class GameApp {
       return;
     }
 
-    if (event.target instanceof Node && this.templateHudNode.contains(event.target)) {
+    if (this.isEditorHudTarget(event.target)) {
       return;
     }
 
@@ -1583,6 +1772,7 @@ export class GameApp {
     }
     this.updateHintText();
     this.updateTemplateHud();
+    this.updateLevelSelectHud();
     this.recolorObstacles();
   }
 
@@ -1727,7 +1917,7 @@ export class GameApp {
   private updateHintText(): void {
     if (this.editorMode) {
       this.hintNode.textContent =
-        "EDIT MODE | ~ exit editor | C create | E select | F enter selected template / exit | Q deselect | Z delete | wheel resize | hold RMB drag";
+        "EDIT MODE | ~ exit editor | C create | E select | F enter selected template / exit | Q deselect | Z delete | wheel resize | hold RMB drag | use Level Select panel";
       return;
     }
 
@@ -1754,6 +1944,8 @@ export class GameApp {
       `dragging: ${this.draggingSphereId ?? "none"}\n` +
       `create template: ${this.createTemplateId}\n` +
       `selected: ${selectedSphereId ?? "none"}\n` +
+      `world id: ${this.currentWorldId}\n` +
+      `levels: ${this.availableWorldIds.length}\n` +
       `world parent: ${this.parentSphere.id}\n` +
       `spheres: ${this.obstacles.length}\n` +
       `world source: ${this.worldSourceState}\n` +
