@@ -357,11 +357,10 @@ async fn handle_ws_connection(
             }
             outbound = rx.recv() => {
                 match outbound {
-                    Ok(ServerMultiplayerMessage::StateSnapshot { world_id: snapshot_world_id, server_tick, players }) => {
+                    Ok(ServerMultiplayerMessage::StateSnapshot { world_id: snapshot_world_id, players }) => {
                         if snapshot_world_id == world_id {
                             let snapshot = ServerMultiplayerMessage::StateSnapshot {
                                 world_id: snapshot_world_id,
-                                server_tick,
                                 players,
                             };
                             if send_ws_message(&mut socket, &snapshot).await.is_err() {

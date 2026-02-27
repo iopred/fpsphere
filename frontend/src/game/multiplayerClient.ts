@@ -2,18 +2,13 @@ import type { BackendWorldSnapshot } from "./worldApi";
 
 export interface RemotePlayerState {
   player_id: string;
-  user_id: string;
-  world_id: string;
   position_3d: [number, number, number];
   yaw: number;
   pitch: number;
-  client_tick: number;
-  updated_at_ms: number;
 }
 
 export interface MultiplayerSnapshot {
   world_id: string;
-  server_tick: number;
   players: RemotePlayerState[];
 }
 

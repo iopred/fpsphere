@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, RwLock};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,8 +13,14 @@ pub struct MultiplayerPlayerState {
     pub position_3d: [f32; 3],
     pub yaw: f32,
     pub pitch: f32,
-    pub client_tick: u64,
-    pub updated_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiplayerPlayerSnapshot {
+    pub player_id: String,
+    pub position_3d: [f32; 3],
+    pub yaw: f32,
+    pub pitch: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,8 +49,7 @@ pub enum ServerMultiplayerMessage {
     },
     StateSnapshot {
         world_id: String,
-        server_tick: u64,
-        players: Vec<MultiplayerPlayerState>,
+        players: Vec<MultiplayerPlayerSnapshot>,
     },
     WorldCommitApplied {
         world_id: String,
@@ -64,7 +68,6 @@ pub enum ServerMultiplayerMessage {
 pub struct MultiplayerHub {
     players: Arc<RwLock<HashMap<String, MultiplayerPlayerState>>>,
     player_seq: Arc<AtomicU64>,
-    server_tick: Arc<AtomicU64>,
     tx: broadcast::Sender<ServerMultiplayerMessage>,
 }
 
@@ -75,7 +78,6 @@ impl MultiplayerHub {
         Self {
             players: Arc::new(RwLock::new(HashMap::new())),
             player_seq: Arc::new(AtomicU64::new(0)),
-            server_tick: Arc::new(AtomicU64::new(0)),
             tx,
         }
     }
@@ -96,8 +98,6 @@ impl MultiplayerHub {
             position_3d: [0.0, -2.5, 16.0],
             yaw: 0.0,
             pitch: 0.0,
-            client_tick: 0,
-            updated_at_ms: now_millis(),
         };
 
         self.players
@@ -123,7 +123,6 @@ impl MultiplayerHub {
             let mut players = self.players.write().await;
             if let Some(player) = players.get_mut(player_id) {
                 player.user_id = next_user_id;
-                player.updated_at_ms = now_millis();
                 world_id_to_broadcast = Some(player.world_id.clone());
             }
         }
@@ -139,7 +138,7 @@ impl MultiplayerHub {
         position_3d: [f32; 3],
         yaw: f32,
         pitch: f32,
-        client_tick: u64,
+        _client_tick: u64,
     ) -> bool {
         let mut world_id_to_broadcast: Option<String> = None;
 
@@ -149,8 +148,6 @@ impl MultiplayerHub {
                 player.position_3d = position_3d;
                 player.yaw = yaw;
                 player.pitch = pitch;
-                player.client_tick = client_tick;
-                player.updated_at_ms = now_millis();
                 world_id_to_broadcast = Some(player.world_id.clone());
             }
         }
@@ -181,16 +178,19 @@ impl MultiplayerHub {
             let map = self.players.read().await;
             map.values()
                 .filter(|item| item.world_id == world_id)
-                .cloned()
+                .map(|item| MultiplayerPlayerSnapshot {
+                    player_id: item.player_id.clone(),
+                    position_3d: item.position_3d,
+                    yaw: item.yaw,
+                    pitch: item.pitch,
+                })
                 .collect::<Vec<_>>()
         };
 
         players.sort_by(|a, b| a.player_id.cmp(&b.player_id));
 
-        let server_tick = self.server_tick.fetch_add(1, Ordering::SeqCst) + 1;
         let _ = self.tx.send(ServerMultiplayerMessage::StateSnapshot {
             world_id: world_id.to_string(),
-            server_tick,
             players,
         });
     }
@@ -210,13 +210,6 @@ impl MultiplayerHub {
             user_id,
             world,
         });
-    }
-}
-
-fn now_millis() -> u64 {
-    match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(duration) => duration.as_millis() as u64,
-        Err(_) => 0,
     }
 }
 

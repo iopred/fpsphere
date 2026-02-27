@@ -67,10 +67,7 @@ pub struct CommitResponse {
     pub commit_id: String,
     pub saved_to: CommitTarget,
     pub reason: Option<String>,
-    pub master_tick: u64,
-    pub user_tick: Option<u64>,
     pub world: WorldSnapshot,
-    pub validation_errors: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -276,10 +273,7 @@ impl WorldRepository {
                         commit_id: format!("master-{}", self.commit_seq),
                         saved_to: CommitTarget::Master,
                         reason: None,
-                        master_tick: candidate.tick,
-                        user_tick: None,
                         world: candidate,
-                        validation_errors: Vec::new(),
                     });
                 }
                 Err(errors) => Some(format!("master validation failed: {}", errors.join("; "))),
@@ -301,20 +295,12 @@ impl WorldRepository {
                 self.user_worlds
                     .insert(user_branch_key, user_candidate.clone());
                 self.commit_seq = self.commit_seq.saturating_add(1);
-                let master_tick = self
-                    .masters
-                    .get(world_id)
-                    .map(|snapshot| snapshot.tick)
-                    .unwrap_or(master.tick);
 
                 Ok(CommitResponse {
                     commit_id: format!("user-{}-{}", request.user_id, self.commit_seq),
                     saved_to: CommitTarget::User,
                     reason: fallback_reason,
-                    master_tick,
-                    user_tick: Some(user_candidate.tick),
                     world: user_candidate,
-                    validation_errors: Vec::new(),
                 })
             }
             Err(errors) => Err(CommitFailure::InvalidOperations {
@@ -479,6 +465,17 @@ fn apply_commit_operations(
                 if world.entities[index].parent_id.is_none() {
                     return Err(vec![format!(
                         "delete failed: cannot delete root sphere '{}'",
+                        sphere_id
+                    )]);
+                }
+
+                if world
+                    .entities
+                    .iter()
+                    .any(|item| item.parent_id.as_deref() == Some(sphere_id.as_str()))
+                {
+                    return Err(vec![format!(
+                        "delete failed: sphere '{}' has child spheres",
                         sphere_id
                     )]);
                 }
@@ -1040,7 +1037,7 @@ mod tests {
             .expect("commit should succeed");
 
         assert!(matches!(response.saved_to, CommitTarget::Master));
-        assert_eq!(response.master_tick, 1);
+        assert_eq!(response.world.tick, 1);
         assert!(response
             .world
             .entities
@@ -1079,8 +1076,7 @@ mod tests {
             .expect("fallback commit should succeed");
 
         assert!(matches!(response.saved_to, CommitTarget::User));
-        assert_eq!(response.master_tick, 1);
-        assert_eq!(response.user_tick, Some(2));
+        assert_eq!(response.world.tick, 2);
         assert!(response.reason.is_some());
     }
 
@@ -1105,6 +1101,47 @@ mod tests {
             .validation_errors()
             .iter()
             .any(|item| item.contains("does not exist")));
+    }
+
+    #[test]
+    fn delete_parent_with_children_is_rejected() {
+        let mut repository = WorldRepository::new(example_world_snapshot());
+
+        repository
+            .commit(
+                "world-main",
+                CommitRequest {
+                    user_id: "alice".to_string(),
+                    base_tick: 0,
+                    operations: vec![CommitOperation::Create {
+                        sphere: make_child_sphere(
+                            "sphere-building-001-child-001",
+                            "sphere-building-001",
+                            1.5,
+                            [-11.0, -1.0, -6.5],
+                        ),
+                    }],
+                },
+            )
+            .expect("child create should succeed");
+
+        let result = repository.commit(
+            "world-main",
+            CommitRequest {
+                user_id: "alice".to_string(),
+                base_tick: 1,
+                operations: vec![CommitOperation::Delete {
+                    sphere_id: "sphere-building-001".to_string(),
+                }],
+            },
+        );
+
+        assert!(result.is_err());
+        let error = result.err().expect("error must exist");
+        assert!(error
+            .validation_errors()
+            .iter()
+            .any(|item| item.contains("has child spheres")));
     }
 
     #[test]

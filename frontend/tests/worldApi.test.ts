@@ -82,9 +82,6 @@ describe("worldApi", () => {
         commit_id: "master-7",
         saved_to: "master",
         reason: null,
-        master_tick: 5,
-        user_tick: null,
-        validation_errors: [],
         world: {
           world_id: "world-main",
           tick: 5,

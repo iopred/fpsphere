@@ -27,10 +27,7 @@ interface BackendCommitResponse {
   commit_id: string;
   saved_to: "master" | "user";
   reason: string | null;
-  master_tick: number;
-  user_tick: number | null;
   world: BackendWorldSnapshot;
-  validation_errors: string[];
 }
 
 interface BackendWorldListResponse {
@@ -124,11 +121,8 @@ export interface CommitWorldResult {
   commitId: string;
   savedTo: "master" | "user";
   reason: string | null;
-  masterTick: number;
-  userTick: number | null;
   tick: number;
   world: SeedWorld;
-  validationErrors: string[];
 }
 
 export class WorldCommitError extends Error {
@@ -354,10 +348,7 @@ export async function commitWorldChanges(
     commitId: payload.commit_id,
     savedTo: payload.saved_to,
     reason: payload.reason,
-    masterTick: payload.master_tick,
-    userTick: payload.user_tick,
     tick: parsedWorld.tick,
     world: parsedWorld.world,
-    validationErrors: payload.validation_errors ?? [],
   };
 }
