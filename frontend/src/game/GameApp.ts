@@ -157,6 +157,7 @@ export class GameApp {
   private multiplayerStatus = "disconnected";
   private multiplayerError: string | null = null;
   private lastNetworkSendTick = 0;
+  private nextInputSequence = 0;
   private worldSourceState: "seed" | "loading" | "backend" | "backend-user" = "loading";
   private disposed = false;
 
@@ -1560,6 +1561,7 @@ export class GameApp {
   private connectMultiplayer(worldId: string): void {
     this.localPlayerId = null;
     this.multiplayerError = null;
+    this.nextInputSequence = 0;
     this.clearRemotePlayers();
 
     this.multiplayerClient.connect({
@@ -2044,14 +2046,25 @@ export class GameApp {
 
     if (this.tick - this.lastNetworkSendTick >= NETWORK_SEND_INTERVAL_TICKS) {
       const orientation = this.controller.getOrientation();
+      const inputSequence = this.nextPlayerInputSequence();
       this.multiplayerClient.sendPlayerUpdate(
         [this.player.position.x, this.player.position.y, this.player.position.z],
         orientation.yaw,
         orientation.pitch,
-        this.tick,
+        inputSequence,
       );
       this.lastNetworkSendTick = this.tick;
     }
+  }
+
+  private nextPlayerInputSequence(): number {
+    if (this.nextInputSequence >= Number.MAX_SAFE_INTEGER) {
+      this.nextInputSequence = 1;
+      return this.nextInputSequence;
+    }
+
+    this.nextInputSequence += 1;
+    return this.nextInputSequence;
   }
 
   private syncCamera(): void {

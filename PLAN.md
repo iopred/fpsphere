@@ -382,7 +382,7 @@ Goal: deliver authoritative multiplayer player movement with client prediction/r
 
 #### S2-B Frontend Netcode
 
-- [ ] `S2-B1` Add input sequence numbering on outgoing local player updates.
+- [x] `S2-B1` Add input sequence numbering on outgoing local player updates.
 - [ ] `S2-B2` Implement client-side local prediction buffer.
 - [ ] `S2-B3` Implement reconciliation against authoritative snapshots using last-acked input sequence.
 - [ ] `S2-B4` Add remote-player interpolation/smoothing layer for snapshot deltas.

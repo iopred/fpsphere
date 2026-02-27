@@ -114,6 +114,7 @@ Client -> server:
   "client_tick": 42
 }
 ```
+  - `client_tick` is the client's monotonically increasing input sequence.
 
 Server -> client:
 - `welcome`:

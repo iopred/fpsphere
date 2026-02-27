@@ -185,14 +185,14 @@ export class MultiplayerClient {
     position3d: [number, number, number],
     yaw: number,
     pitch: number,
-    clientTick: number,
+    inputSequence: number,
   ): void {
     this.send({
       type: "player_update",
       position_3d: position3d,
       yaw,
       pitch,
-      client_tick: clientTick,
+      client_tick: inputSequence,
     });
   }
 
