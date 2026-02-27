@@ -40,16 +40,19 @@ Initial implementation scaffold for:
 8. Template selector HUD:
    - Top-right HUD lets you pick the template id used by `C` create in editor mode.
    - The same HUD can change `world_template` on the currently selected sphere.
-9. Editor transform controls:
+9. Level manager HUD:
+   - In editor mode, use the Level Select panel to switch levels.
+   - Use `Add` to create a new level and `Remove` to delete an existing level.
+10. Editor transform controls:
    - Mouse wheel resizes the selected sphere radius.
    - Hold right mouse button to drag the selected sphere along your view direction.
-10. Sphere world navigation:
+11. Sphere world navigation:
    - `F` in editor mode enters the template world of the selected sphere (`world_template > 0`).
    - `F` with no selected sphere exits back to the parent world.
-11. QR marker printer:
+12. QR marker printer:
    - Open `http://localhost:5173/?mode=qr`.
    - Pick a `world_id`, optional AR world scale multiplier, then print at 100% scale.
-12. Mobile AR marker viewer:
+13. Mobile AR marker viewer:
    - Open `http://localhost:5173/?mode=ar` on a phone browser (uses native `BarcodeDetector` when available, otherwise JS fallback).
    - Grant camera access and point at the printed marker to anchor the FPSphere world on top of the live camera view.
    - AR mode now renders the same world snapshot/model pipeline as FPS mode and also displays live remote multiplayer players.
@@ -69,9 +72,13 @@ Initial implementation scaffold for:
    - `http://127.0.0.1:4000/api/v1/world/world-main`
 5. Available worlds:
    - `http://127.0.0.1:4000/api/v1/worlds`
-6. Commit endpoint:
+6. Create world:
+   - `POST http://127.0.0.1:4000/api/v1/world`
+7. Delete world:
+   - `DELETE http://127.0.0.1:4000/api/v1/world/<world_id>`
+8. Commit endpoint:
    - `POST http://127.0.0.1:4000/api/v1/world/world-main/commit`
-7. Multiplayer endpoint:
+9. Multiplayer endpoint:
    - `ws://127.0.0.1:4000/ws?user_id=<id>&world_id=world-main`
 
 ## Current milestone status

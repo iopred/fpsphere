@@ -6,8 +6,13 @@
   - response: service status
 - `GET /api/v1/worlds`
   - response: `{ "world_ids": string[] }`
+- `POST /api/v1/world`
+  - request: `{ "world_id": "<id>" }`
+  - response: `{ "world_id": "<id>" }`
 - `GET /api/v1/world/:world_id`
   - response: `WorldSnapshot`
+- `DELETE /api/v1/world/:world_id`
+  - response: `204 No Content`
 - `GET /api/v1/world/:world_id?user_id=<id>`
   - response: user branch `WorldSnapshot` if it exists, otherwise master
 - `POST /api/v1/world/:world_id/commit`

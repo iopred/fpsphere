@@ -102,16 +102,47 @@ impl CommitFailure {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum WorldMutationFailure {
+    InvalidWorldId {
+        message: String,
+    },
+    WorldAlreadyExists {
+        message: String,
+    },
+    WorldNotFound {
+        message: String,
+    },
+    LastWorldRemovalForbidden {
+        message: String,
+    },
+}
+
+impl WorldMutationFailure {
+    pub fn message(&self) -> String {
+        match self {
+            WorldMutationFailure::InvalidWorldId { message } => message.clone(),
+            WorldMutationFailure::WorldAlreadyExists { message } => message.clone(),
+            WorldMutationFailure::WorldNotFound { message } => message.clone(),
+            WorldMutationFailure::LastWorldRemovalForbidden { message } => message.clone(),
+        }
+    }
+}
+
 pub struct WorldRepository {
-    master: WorldSnapshot,
-    user_worlds: HashMap<String, WorldSnapshot>,
+    masters: HashMap<String, WorldSnapshot>,
+    user_worlds: HashMap<(String, String), WorldSnapshot>,
     commit_seq: u64,
 }
 
 impl WorldRepository {
     pub fn new(initial_world: WorldSnapshot) -> Self {
+        let world_id = initial_world.world_id.clone();
+        let mut masters = HashMap::new();
+        masters.insert(world_id, initial_world);
+
         Self {
-            master: initial_world,
+            masters,
             user_worlds: HashMap::new(),
             commit_seq: 0,
         }
@@ -122,21 +153,99 @@ impl WorldRepository {
         world_id: &str,
         user_id: Option<&str>,
     ) -> Option<WorldSnapshot> {
-        if self.master.world_id != world_id {
-            return None;
-        }
-
         if let Some(user_id_value) = user_id {
-            if let Some(snapshot) = self.user_worlds.get(user_id_value) {
+            if let Some(snapshot) = self
+                .user_worlds
+                .get(&(world_id.to_string(), user_id_value.to_string()))
+            {
                 return Some(snapshot.clone());
             }
         }
 
-        Some(self.master.clone())
+        self.masters.get(world_id).cloned()
     }
 
     pub fn list_world_ids(&self) -> Vec<String> {
-        vec![self.master.world_id.clone()]
+        let mut world_ids = self.masters.keys().cloned().collect::<Vec<_>>();
+        world_ids.sort();
+        world_ids
+    }
+
+    fn validate_world_id(world_id: &str) -> Result<(), WorldMutationFailure> {
+        let trimmed = world_id.trim();
+        if trimmed.is_empty() {
+            return Err(WorldMutationFailure::InvalidWorldId {
+                message: "world_id is required".to_string(),
+            });
+        }
+
+        if trimmed.len() > 64 {
+            return Err(WorldMutationFailure::InvalidWorldId {
+                message: "world_id must be <= 64 characters".to_string(),
+            });
+        }
+
+        if !trimmed
+            .chars()
+            .all(|value| value.is_ascii_alphanumeric() || value == '-' || value == '_' || value == '.')
+        {
+            return Err(WorldMutationFailure::InvalidWorldId {
+                message:
+                    "world_id may only include ASCII letters, numbers, '-', '_', or '.'"
+                        .to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    pub fn create_world(
+        &mut self,
+        world_id_input: &str,
+    ) -> Result<WorldSnapshot, WorldMutationFailure> {
+        Self::validate_world_id(world_id_input)?;
+        let world_id = world_id_input.trim().to_string();
+        if self.masters.contains_key(&world_id) {
+            return Err(WorldMutationFailure::WorldAlreadyExists {
+                message: format!("world '{}' already exists", world_id),
+            });
+        }
+
+        let template = self
+            .masters
+            .get("world-main")
+            .or_else(|| self.masters.values().next())
+            .cloned()
+            .ok_or_else(|| WorldMutationFailure::WorldNotFound {
+                message: "unable to create world: no source world exists".to_string(),
+            })?;
+
+        let mut next_world = template;
+        next_world.world_id = world_id.clone();
+        next_world.tick = 0;
+
+        self.masters.insert(world_id, next_world.clone());
+        Ok(next_world)
+    }
+
+    pub fn delete_world(&mut self, world_id_input: &str) -> Result<(), WorldMutationFailure> {
+        let world_id = world_id_input.trim();
+        if !self.masters.contains_key(world_id) {
+            return Err(WorldMutationFailure::WorldNotFound {
+                message: format!("world '{}' not found", world_id),
+            });
+        }
+
+        if self.masters.len() <= 1 {
+            return Err(WorldMutationFailure::LastWorldRemovalForbidden {
+                message: "cannot delete the last remaining world".to_string(),
+            });
+        }
+
+        self.masters.remove(world_id);
+        self.user_worlds
+            .retain(|(branch_world_id, _), _| branch_world_id != world_id);
+        Ok(())
     }
 
     pub fn commit(
@@ -144,30 +253,33 @@ impl WorldRepository {
         world_id: &str,
         request: CommitRequest,
     ) -> Result<CommitResponse, CommitFailure> {
-        if self.master.world_id != world_id {
-            return Err(CommitFailure::WorldNotFound {
-                message: format!("world '{}' not found", world_id),
-            });
-        }
+        let master = match self.masters.get(world_id) {
+            Some(snapshot) => snapshot.clone(),
+            None => {
+                return Err(CommitFailure::WorldNotFound {
+                    message: format!("world '{}' not found", world_id),
+                })
+            }
+        };
 
-        let fallback_reason: Option<String> = if request.base_tick != self.master.tick {
+        let fallback_reason: Option<String> = if request.base_tick != master.tick {
             Some(format!(
                 "master tick mismatch: client={} server={}",
-                request.base_tick, self.master.tick
+                request.base_tick, master.tick
             ))
         } else {
-            let mut candidate = self.master.clone();
+            let mut candidate = master.clone();
             match apply_commit_operations(&mut candidate, &request.operations) {
                 Ok(()) => {
                     candidate.tick = candidate.tick.saturating_add(1);
-                    self.master = candidate.clone();
+                    self.masters.insert(world_id.to_string(), candidate.clone());
                     self.commit_seq = self.commit_seq.saturating_add(1);
 
                     return Ok(CommitResponse {
                         commit_id: format!("master-{}", self.commit_seq),
                         saved_to: CommitTarget::Master,
                         reason: None,
-                        master_tick: self.master.tick,
+                        master_tick: candidate.tick,
                         user_tick: None,
                         world: candidate,
                         validation_errors: Vec::new(),
@@ -177,25 +289,31 @@ impl WorldRepository {
             }
         };
 
+        let user_branch_key = (world_id.to_string(), request.user_id.clone());
         let base_for_user = self
             .user_worlds
-            .get(&request.user_id)
+            .get(&user_branch_key)
             .cloned()
-            .unwrap_or_else(|| self.master.clone());
+            .unwrap_or_else(|| master.clone());
 
         let mut user_candidate = base_for_user;
         match apply_commit_operations(&mut user_candidate, &request.operations) {
             Ok(()) => {
                 user_candidate.tick = user_candidate.tick.saturating_add(1);
                 self.user_worlds
-                    .insert(request.user_id.clone(), user_candidate.clone());
+                    .insert(user_branch_key, user_candidate.clone());
                 self.commit_seq = self.commit_seq.saturating_add(1);
+                let master_tick = self
+                    .masters
+                    .get(world_id)
+                    .map(|snapshot| snapshot.tick)
+                    .unwrap_or(master.tick);
 
                 Ok(CommitResponse {
                     commit_id: format!("user-{}-{}", request.user_id, self.commit_seq),
                     saved_to: CommitTarget::User,
                     reason: fallback_reason,
-                    master_tick: self.master.tick,
+                    master_tick,
                     user_tick: Some(user_candidate.tick),
                     world: user_candidate,
                     validation_errors: Vec::new(),
@@ -484,7 +602,7 @@ pub fn example_world_snapshot() -> WorldSnapshot {
 mod tests {
     use super::{
         example_world_snapshot, CommitOperation, CommitRequest, CommitTarget, SphereEntity,
-        TimeWindow, WorldRepository,
+        TimeWindow, WorldMutationFailure, WorldRepository,
     };
     use std::collections::BTreeMap;
 
@@ -527,6 +645,77 @@ mod tests {
     fn list_world_ids_returns_master_world() {
         let repository = WorldRepository::new(example_world_snapshot());
         assert_eq!(repository.list_world_ids(), vec!["world-main".to_string()]);
+    }
+
+    #[test]
+    fn create_world_adds_world_and_is_listed() {
+        let mut repository = WorldRepository::new(example_world_snapshot());
+        let created = repository
+            .create_world("world-beta")
+            .expect("create world should succeed");
+
+        assert_eq!(created.world_id, "world-beta");
+        assert_eq!(
+            repository.list_world_ids(),
+            vec!["world-beta".to_string(), "world-main".to_string()]
+        );
+
+        let loaded = repository
+            .get_world_snapshot("world-beta", None)
+            .expect("created world should be readable");
+        assert_eq!(loaded.world_id, "world-beta");
+        assert_eq!(loaded.tick, 0);
+    }
+
+    #[test]
+    fn create_world_rejects_invalid_ids() {
+        let mut repository = WorldRepository::new(example_world_snapshot());
+        let result = repository.create_world("invalid level id!");
+        assert!(matches!(
+            result,
+            Err(WorldMutationFailure::InvalidWorldId { .. })
+        ));
+    }
+
+    #[test]
+    fn delete_world_removes_master_and_user_branch() {
+        let mut repository = WorldRepository::new(example_world_snapshot());
+        repository
+            .create_world("world-beta")
+            .expect("create world should succeed");
+
+        repository
+            .commit(
+                "world-beta",
+                CommitRequest {
+                    user_id: "alice".to_string(),
+                    base_tick: 99,
+                    operations: vec![CommitOperation::Create {
+                        sphere: make_test_sphere("sphere-user-beta-001"),
+                    }],
+                },
+            )
+            .expect("fallback user commit should succeed");
+
+        repository
+            .delete_world("world-beta")
+            .expect("delete world should succeed");
+
+        assert_eq!(repository.list_world_ids(), vec!["world-main".to_string()]);
+        assert!(repository.get_world_snapshot("world-beta", None).is_none());
+        assert!(repository
+            .get_world_snapshot("world-beta", Some("alice"))
+            .is_none());
+    }
+
+    #[test]
+    fn delete_world_rejects_removing_last_world() {
+        let mut repository = WorldRepository::new(example_world_snapshot());
+        let result = repository.delete_world("world-main");
+        assert!(matches!(
+            result,
+            Err(WorldMutationFailure::LastWorldRemovalForbidden { .. })
+        ));
     }
 
     #[test]

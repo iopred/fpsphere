@@ -140,8 +140,32 @@ body,
   padding-right: 2px;
 }
 
+.level-select-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.level-select-input {
+  border: 1px solid rgba(104, 139, 229, 0.5);
+  background: rgba(15, 24, 39, 0.92);
+  color: #eaf1ff;
+  border-radius: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.level-select-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
 .level-select-button,
-.level-select-refresh {
+.level-select-refresh,
+.level-select-create-button,
+.level-select-delete {
   border: 1px solid rgba(104, 139, 229, 0.5);
   background: rgba(19, 29, 52, 0.9);
   color: #eaf1ff;
@@ -161,6 +185,12 @@ body,
 
 .level-select-refresh {
   text-align: center;
+}
+
+.level-select-delete,
+.level-select-create-button {
+  text-align: center;
+  min-width: 70px;
 }
 
 .level-select button:disabled {

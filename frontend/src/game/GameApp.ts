@@ -22,6 +22,8 @@ import {
 import { buildSeedWorld } from "./worldSeed";
 import {
   commitWorldChanges,
+  createWorldLevel,
+  deleteWorldLevel,
   fetchAvailableWorldIds,
   fetchWorldSeed,
   parseLoadedWorldSnapshot,
@@ -79,6 +81,8 @@ export class GameApp {
   private readonly levelSelectNode: HTMLDivElement;
   private readonly levelSelectStatusNode: HTMLDivElement;
   private readonly levelSelectListNode: HTMLDivElement;
+  private readonly levelCreateInput: HTMLInputElement;
+  private readonly levelCreateButton: HTMLButtonElement;
   private readonly levelSelectRefreshButton: HTMLButtonElement;
 
   private readonly controller: FpsController;
@@ -129,6 +133,8 @@ export class GameApp {
   private currentWorldId = DEFAULT_WORLD_ID;
   private availableWorldIds = [DEFAULT_WORLD_ID];
   private loadingWorldId: string | null = null;
+  private levelMutationInFlight = false;
+  private levelSelectMessage: string | null = null;
   private worldLoadVersion = 0;
   private localPlayerId: string | null = null;
   private multiplayerStatus = "disconnected";
@@ -236,12 +242,40 @@ export class GameApp {
     this.levelSelectListNode.className = "level-select-list";
     this.levelSelectNode.appendChild(this.levelSelectListNode);
 
+    const levelCreateRow = document.createElement("div");
+    levelCreateRow.className = "level-select-create";
+
+    this.levelCreateInput = document.createElement("input");
+    this.levelCreateInput.className = "level-select-input";
+    this.levelCreateInput.type = "text";
+    this.levelCreateInput.placeholder = "new-level-id";
+    this.levelCreateInput.autocomplete = "off";
+    this.levelCreateInput.spellcheck = false;
+    this.levelCreateInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+      event.preventDefault();
+      void this.createLevelFromInput();
+    });
+    levelCreateRow.appendChild(this.levelCreateInput);
+
+    this.levelCreateButton = document.createElement("button");
+    this.levelCreateButton.type = "button";
+    this.levelCreateButton.className = "level-select-create-button";
+    this.levelCreateButton.textContent = "Add";
+    this.levelCreateButton.addEventListener("click", () => {
+      void this.createLevelFromInput();
+    });
+    levelCreateRow.appendChild(this.levelCreateButton);
+    this.levelSelectNode.appendChild(levelCreateRow);
+
     this.levelSelectRefreshButton = document.createElement("button");
     this.levelSelectRefreshButton.type = "button";
     this.levelSelectRefreshButton.className = "level-select-refresh";
     this.levelSelectRefreshButton.textContent = "Refresh";
     this.levelSelectRefreshButton.addEventListener("click", () => {
-      void this.refreshAvailableWorldIds();
+      void this.refreshAvailableWorldIds({ preserveCurrentWorldId: true });
     });
     this.levelSelectNode.appendChild(this.levelSelectRefreshButton);
     this.mountNode.appendChild(this.levelSelectNode);
@@ -379,7 +413,7 @@ export class GameApp {
   };
 
   private async initializeLevelSelection(): Promise<void> {
-    await this.refreshAvailableWorldIds();
+    await this.refreshAvailableWorldIds({ preserveCurrentWorldId: true });
     await this.selectWorldLevel(this.currentWorldId, true);
   }
 
@@ -400,7 +434,15 @@ export class GameApp {
     return normalizedWorldIds;
   }
 
-  private async refreshAvailableWorldIds(): Promise<void> {
+  private isLevelSelectBusy(): boolean {
+    return this.loadingWorldId !== null || this.saveInFlight || this.levelMutationInFlight;
+  }
+
+  private async refreshAvailableWorldIds(options: {
+    preserveCurrentWorldId: boolean;
+  }): Promise<void> {
+    const { preserveCurrentWorldId } = options;
+    const fallbackWorldIds = [...this.availableWorldIds];
     this.levelSelectRefreshButton.disabled = true;
 
     try {
@@ -411,15 +453,108 @@ export class GameApp {
 
       const normalizedWorldIds = this.normalizeWorldIds(fetchedWorldIds);
       this.availableWorldIds =
-        normalizedWorldIds.length > 0
-          ? normalizedWorldIds
-          : this.normalizeWorldIds([this.currentWorldId, ...this.availableWorldIds]);
+        normalizedWorldIds.length > 0 ? normalizedWorldIds : this.normalizeWorldIds(fallbackWorldIds);
     } catch (error) {
       console.warn("Failed to fetch world list", error);
-      this.availableWorldIds = this.normalizeWorldIds([this.currentWorldId, ...this.availableWorldIds]);
+      this.availableWorldIds = this.normalizeWorldIds(fallbackWorldIds);
+      this.levelSelectMessage =
+        error instanceof Error ? `level refresh failed: ${error.message}` : "level refresh failed";
     } finally {
       if (!this.disposed) {
-        this.availableWorldIds = this.normalizeWorldIds([this.currentWorldId, ...this.availableWorldIds]);
+        this.availableWorldIds = preserveCurrentWorldId
+          ? this.normalizeWorldIds([this.currentWorldId, ...this.availableWorldIds])
+          : this.normalizeWorldIds(this.availableWorldIds);
+        this.updateLevelSelectHud();
+      }
+    }
+  }
+
+  private async createLevelFromInput(): Promise<void> {
+    if (this.isLevelSelectBusy()) {
+      return;
+    }
+
+    const requestedWorldId = this.levelCreateInput.value.trim();
+    if (requestedWorldId.length === 0) {
+      this.levelSelectMessage = "enter a level id";
+      this.updateLevelSelectHud();
+      return;
+    }
+
+    this.levelMutationInFlight = true;
+    this.levelSelectMessage = `creating "${requestedWorldId}"...`;
+    this.updateLevelSelectHud();
+
+    try {
+      const createdWorldId = await createWorldLevel(requestedWorldId);
+      if (this.disposed) {
+        return;
+      }
+
+      this.levelCreateInput.value = "";
+      this.levelSelectMessage = `created "${createdWorldId}"`;
+      await this.refreshAvailableWorldIds({ preserveCurrentWorldId: true });
+      await this.selectWorldLevel(createdWorldId, true);
+    } catch (error) {
+      if (this.disposed) {
+        return;
+      }
+
+      this.levelSelectMessage =
+        error instanceof Error ? `create failed: ${error.message}` : "create failed";
+    } finally {
+      if (!this.disposed) {
+        this.levelMutationInFlight = false;
+        this.updateLevelSelectHud();
+      }
+    }
+  }
+
+  private async deleteWorldLevelById(worldId: string): Promise<void> {
+    if (this.isLevelSelectBusy()) {
+      return;
+    }
+
+    if (this.availableWorldIds.length <= 1) {
+      this.levelSelectMessage = "cannot remove the last level";
+      this.updateLevelSelectHud();
+      return;
+    }
+
+    if (!window.confirm(`Delete level "${worldId}"?`)) {
+      return;
+    }
+
+    const deletingCurrentWorld = worldId === this.currentWorldId;
+    this.levelMutationInFlight = true;
+    this.levelSelectMessage = `removing "${worldId}"...`;
+    this.updateLevelSelectHud();
+
+    try {
+      await deleteWorldLevel(worldId);
+      if (this.disposed) {
+        return;
+      }
+
+      this.levelSelectMessage = `removed "${worldId}"`;
+      await this.refreshAvailableWorldIds({
+        preserveCurrentWorldId: !deletingCurrentWorld,
+      });
+
+      if (deletingCurrentWorld) {
+        const nextWorldId = this.availableWorldIds[0] ?? DEFAULT_WORLD_ID;
+        await this.selectWorldLevel(nextWorldId, true);
+      }
+    } catch (error) {
+      if (this.disposed) {
+        return;
+      }
+
+      this.levelSelectMessage =
+        error instanceof Error ? `remove failed: ${error.message}` : "remove failed";
+    } finally {
+      if (!this.disposed) {
+        this.levelMutationInFlight = false;
         this.updateLevelSelectHud();
       }
     }
@@ -445,6 +580,7 @@ export class GameApp {
     this.worldLoadVersion = requestVersion;
     this.loadingWorldId = worldId;
     this.currentWorldId = worldId;
+    this.levelSelectMessage = null;
     this.availableWorldIds = this.normalizeWorldIds([worldId, ...this.availableWorldIds]);
     this.pendingCommitOperations = [];
     this.refreshPendingSaveMessage();
@@ -473,30 +609,53 @@ export class GameApp {
 
     if (this.loadingWorldId) {
       this.levelSelectStatusNode.textContent = `Loading "${this.loadingWorldId}"...`;
+    } else if (this.levelMutationInFlight) {
+      this.levelSelectStatusNode.textContent = "Updating levels...";
+    } else if (this.levelSelectMessage) {
+      this.levelSelectStatusNode.textContent = this.levelSelectMessage;
     } else {
       this.levelSelectStatusNode.textContent = `Current: ${this.currentWorldId}`;
     }
 
+    const controlsDisabled = this.isLevelSelectBusy();
+    this.levelCreateInput.disabled = controlsDisabled;
+    this.levelCreateButton.disabled = controlsDisabled;
+
     this.levelSelectListNode.textContent = "";
     for (const worldId of this.availableWorldIds) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "level-select-button";
-      button.textContent = worldId;
+      const row = document.createElement("div");
+      row.className = "level-select-row";
+
+      const selectButton = document.createElement("button");
+      selectButton.type = "button";
+      selectButton.className = "level-select-button";
+      selectButton.textContent = worldId;
 
       const active = worldId === this.currentWorldId;
       if (active) {
-        button.classList.add("level-select-button-active");
+        selectButton.classList.add("level-select-button-active");
       }
 
-      button.disabled = active || this.loadingWorldId !== null || this.saveInFlight;
-      button.addEventListener("click", () => {
+      selectButton.disabled = active || controlsDisabled;
+      selectButton.addEventListener("click", () => {
         void this.selectWorldLevel(worldId);
       });
-      this.levelSelectListNode.appendChild(button);
+      row.appendChild(selectButton);
+
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "level-select-delete";
+      removeButton.textContent = "Remove";
+      removeButton.disabled = controlsDisabled || this.availableWorldIds.length <= 1;
+      removeButton.addEventListener("click", () => {
+        void this.deleteWorldLevelById(worldId);
+      });
+      row.appendChild(removeButton);
+
+      this.levelSelectListNode.appendChild(row);
     }
 
-    this.levelSelectRefreshButton.disabled = this.loadingWorldId !== null || this.saveInFlight;
+    this.levelSelectRefreshButton.disabled = controlsDisabled;
   }
 
   private async loadWorldFromBackend(worldId: string, requestVersion: number): Promise<void> {
@@ -518,6 +677,7 @@ export class GameApp {
       this.pendingCommitOperations = [];
       this.refreshPendingSaveMessage();
       this.worldSourceState = hydrated ? "backend" : "seed";
+      this.levelSelectMessage = null;
       this.saveMessage = `loaded level "${worldId}"`;
     } catch (error) {
       if (this.disposed || requestVersion !== this.worldLoadVersion) {
@@ -532,6 +692,7 @@ export class GameApp {
       this.pendingCommitOperations = [];
       this.refreshPendingSaveMessage();
       this.worldSourceState = "seed";
+      this.levelSelectMessage = `load failed for "${worldId}"`;
       this.saveMessage = `load failed for "${worldId}", using seed fallback`;
       console.warn("Failed to load world from backend, using local seed world", error);
     }

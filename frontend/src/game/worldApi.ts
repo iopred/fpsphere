@@ -37,10 +37,19 @@ interface BackendWorldListResponse {
   world_ids: string[];
 }
 
+interface BackendWorldMutationResponse {
+  world_id: string;
+}
+
 interface BackendCommitError {
   status: string;
   message: string;
   validation_errors?: string[];
+}
+
+interface BackendWorldMutationError {
+  status: string;
+  message: string;
 }
 
 interface BackendCommitRequest {
@@ -265,6 +274,49 @@ export async function fetchAvailableWorldIds(): Promise<string[]> {
   }
 
   return uniqueWorldIds;
+}
+
+export async function createWorldLevel(worldIdInput: string): Promise<string> {
+  const worldId = worldIdInput.trim();
+  if (worldId.length === 0) {
+    throw new Error("world_id is required");
+  }
+
+  const response = await fetch("/api/v1/world", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ world_id: worldId }),
+  });
+
+  if (!response.ok) {
+    const errorPayload = (await response.json()) as BackendWorldMutationError;
+    throw new Error(errorPayload.message ?? "Failed to create world");
+  }
+
+  const payload = (await response.json()) as BackendWorldMutationResponse;
+  if (typeof payload.world_id !== "string" || payload.world_id.trim().length === 0) {
+    throw new Error("Invalid create world response payload: world_id is required");
+  }
+
+  return payload.world_id.trim();
+}
+
+export async function deleteWorldLevel(worldIdInput: string): Promise<void> {
+  const worldId = worldIdInput.trim();
+  if (worldId.length === 0) {
+    throw new Error("world_id is required");
+  }
+
+  const response = await fetch(`/api/v1/world/${encodeURIComponent(worldId)}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    const errorPayload = (await response.json()) as BackendWorldMutationError;
+    throw new Error(errorPayload.message ?? "Failed to delete world");
+  }
 }
 
 export async function commitWorldChanges(

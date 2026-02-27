@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   commitWorldChanges,
+  createWorldLevel,
+  deleteWorldLevel,
   fetchAvailableWorldIds,
   fetchWorldSeed,
   WorldCommitError,
@@ -209,6 +211,48 @@ describe("worldApi", () => {
 
     await expect(fetchAvailableWorldIds()).rejects.toThrow(
       "Invalid world list payload: world_ids must be an array",
+    );
+  });
+
+  it("creates a world level and returns its id", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      expect(init?.method).toBe("POST");
+      expect(init?.headers).toEqual({ "Content-Type": "application/json" });
+      expect(JSON.parse(String(init?.body))).toEqual({ world_id: "world-beta" });
+
+      return new Response(JSON.stringify({ world_id: "world-beta" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    globalThis.fetch = fetchMock as typeof globalThis.fetch;
+    await expect(createWorldLevel("world-beta")).resolves.toBe("world-beta");
+  });
+
+  it("deletes a world level", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      expect(init?.method).toBe("DELETE");
+      return new Response(null, { status: 204 });
+    });
+
+    globalThis.fetch = fetchMock as typeof globalThis.fetch;
+    await expect(deleteWorldLevel("world-beta")).resolves.toBeUndefined();
+  });
+
+  it("throws create world error from backend message", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({ status: "error", message: "world 'world-beta' already exists" }),
+        {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }) as typeof globalThis.fetch;
+
+    await expect(createWorldLevel("world-beta")).rejects.toThrow(
+      "world 'world-beta' already exists",
     );
   });
 });

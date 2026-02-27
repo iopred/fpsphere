@@ -10,7 +10,7 @@ use axum::{Json, Router};
 use multiplayer::{ClientMultiplayerMessage, MultiplayerHub, ServerMultiplayerMessage};
 use protocol::{
     example_world_snapshot, CommitFailure, CommitRequest, CommitResponse, CommitTarget,
-    WorldRepository, WorldSnapshot,
+    WorldMutationFailure, WorldRepository, WorldSnapshot,
 };
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -53,6 +53,22 @@ struct WorldListResponse {
     world_ids: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct CreateWorldRequest {
+    world_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct WorldMutationResponse {
+    world_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct WorldMutationErrorResponse {
+    status: &'static str,
+    message: String,
+}
+
 #[tokio::main]
 async fn main() {
     let _ = dotenvy::from_filename(".env");
@@ -75,7 +91,11 @@ async fn main() {
     let app = Router::new()
         .route("/healthz", get(health))
         .route("/api/v1/worlds", get(list_worlds))
-        .route("/api/v1/world/{world_id}", get(get_world_snapshot))
+        .route("/api/v1/world", post(create_world))
+        .route(
+            "/api/v1/world/{world_id}",
+            get(get_world_snapshot).delete(delete_world),
+        )
         .route("/api/v1/world/{world_id}/commit", post(commit_world))
         .route("/ws", get(ws_handler))
         .with_state(app_state);
@@ -107,6 +127,48 @@ async fn list_worlds(State(state): State<AppState>) -> Json<WorldListResponse> {
     Json(WorldListResponse {
         world_ids: repository.list_world_ids(),
     })
+}
+
+async fn create_world(
+    State(state): State<AppState>,
+    Json(request): Json<CreateWorldRequest>,
+) -> Result<(StatusCode, Json<WorldMutationResponse>), (StatusCode, Json<WorldMutationErrorResponse>)>
+{
+    let response = {
+        let mut repository = state.repository.write().await;
+        repository.create_world(&request.world_id)
+    };
+
+    match response {
+        Ok(world) => Ok((
+            StatusCode::CREATED,
+            Json(WorldMutationResponse {
+                world_id: world.world_id,
+            }),
+        )),
+        Err(WorldMutationFailure::InvalidWorldId { message }) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(WorldMutationErrorResponse {
+                status: "error",
+                message,
+            }),
+        )),
+        Err(WorldMutationFailure::WorldAlreadyExists { message }) => Err((
+            StatusCode::CONFLICT,
+            Json(WorldMutationErrorResponse {
+                status: "error",
+                message,
+            }),
+        )),
+        Err(error @ WorldMutationFailure::WorldNotFound { .. })
+        | Err(error @ WorldMutationFailure::LastWorldRemovalForbidden { .. }) => Err((
+            StatusCode::CONFLICT,
+            Json(WorldMutationErrorResponse {
+                status: "error",
+                message: error.message(),
+            }),
+        )),
+    }
 }
 
 async fn get_world_snapshot(
@@ -187,6 +249,36 @@ async fn commit_world(
                 status: "error",
                 message: error.message(),
                 validation_errors: error.validation_errors(),
+            }),
+        )),
+    }
+}
+
+async fn delete_world(
+    Path(world_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<StatusCode, (StatusCode, Json<WorldMutationErrorResponse>)> {
+    let response = {
+        let mut repository = state.repository.write().await;
+        repository.delete_world(&world_id)
+    };
+
+    match response {
+        Ok(()) => Ok(StatusCode::NO_CONTENT),
+        Err(WorldMutationFailure::WorldNotFound { message }) => Err((
+            StatusCode::NOT_FOUND,
+            Json(WorldMutationErrorResponse {
+                status: "error",
+                message,
+            }),
+        )),
+        Err(error @ WorldMutationFailure::LastWorldRemovalForbidden { .. })
+        | Err(error @ WorldMutationFailure::InvalidWorldId { .. })
+        | Err(error @ WorldMutationFailure::WorldAlreadyExists { .. }) => Err((
+            StatusCode::CONFLICT,
+            Json(WorldMutationErrorResponse {
+                status: "error",
+                message: error.message(),
             }),
         )),
     }
