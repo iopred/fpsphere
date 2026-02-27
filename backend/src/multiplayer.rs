@@ -4,6 +4,9 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
+use tokio::time::{interval, Duration, MissedTickBehavior};
+
+const SNAPSHOT_TICK_INTERVAL: Duration = Duration::from_micros(16_666);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiplayerPlayerState {
@@ -74,11 +77,50 @@ pub struct MultiplayerHub {
 impl MultiplayerHub {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(256);
-
-        Self {
+        let hub = Self {
             players: Arc::new(RwLock::new(HashMap::new())),
             player_seq: Arc::new(AtomicU64::new(0)),
             tx,
+        };
+        hub.start_snapshot_loop();
+        hub
+    }
+
+    fn start_snapshot_loop(&self) {
+        let Ok(runtime_handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+
+        let hub = self.clone();
+        runtime_handle.spawn(async move {
+            hub.run_snapshot_loop().await;
+        });
+    }
+
+    async fn run_snapshot_loop(self) {
+        let mut ticker = interval(SNAPSHOT_TICK_INTERVAL);
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        loop {
+            ticker.tick().await;
+            self.broadcast_all_world_snapshots().await;
+        }
+    }
+
+    async fn broadcast_all_world_snapshots(&self) {
+        let world_ids = {
+            let map = self.players.read().await;
+            let mut ids = map
+                .values()
+                .map(|item| item.world_id.clone())
+                .collect::<Vec<_>>();
+            ids.sort();
+            ids.dedup();
+            ids
+        };
+
+        for world_id in world_ids {
+            self.broadcast_world_snapshot(world_id.as_str()).await;
         }
     }
 
@@ -104,7 +146,6 @@ impl MultiplayerHub {
             .write()
             .await
             .insert(player_id, player_state.clone());
-        self.broadcast_world_snapshot(&world_id).await;
 
         player_state
     }
@@ -118,17 +159,9 @@ impl MultiplayerHub {
             return;
         }
 
-        let mut world_id_to_broadcast: Option<String> = None;
-        {
-            let mut players = self.players.write().await;
-            if let Some(player) = players.get_mut(player_id) {
-                player.user_id = next_user_id;
-                world_id_to_broadcast = Some(player.world_id.clone());
-            }
-        }
-
-        if let Some(world_id) = world_id_to_broadcast {
-            self.broadcast_world_snapshot(&world_id).await;
+        let mut players = self.players.write().await;
+        if let Some(player) = players.get_mut(player_id) {
+            player.user_id = next_user_id;
         }
     }
 
@@ -140,37 +173,20 @@ impl MultiplayerHub {
         pitch: f32,
         _client_tick: u64,
     ) -> bool {
-        let mut world_id_to_broadcast: Option<String> = None;
-
         {
             let mut players = self.players.write().await;
             if let Some(player) = players.get_mut(player_id) {
                 player.position_3d = position_3d;
                 player.yaw = yaw;
                 player.pitch = pitch;
-                world_id_to_broadcast = Some(player.world_id.clone());
+                return true;
             }
         }
-
-        if let Some(world_id) = world_id_to_broadcast {
-            self.broadcast_world_snapshot(&world_id).await;
-            return true;
-        }
-
         false
     }
 
     pub async fn remove_player(&self, player_id: &str) {
-        let removed_world_id = self
-            .players
-            .write()
-            .await
-            .remove(player_id)
-            .map(|item| item.world_id);
-
-        if let Some(world_id) = removed_world_id {
-            self.broadcast_world_snapshot(&world_id).await;
-        }
+        self.players.write().await.remove(player_id);
     }
 
     pub async fn broadcast_world_snapshot(&self, world_id: &str) {
@@ -217,6 +233,7 @@ impl MultiplayerHub {
 mod tests {
     use super::{MultiplayerHub, ServerMultiplayerMessage};
     use crate::protocol::{example_world_snapshot, CommitTarget};
+    use tokio::time::{timeout, Duration};
 
     #[tokio::test]
     async fn add_update_and_remove_player() {
@@ -231,6 +248,39 @@ mod tests {
         assert!(updated);
 
         hub.remove_player(&player.player_id).await;
+    }
+
+    #[tokio::test]
+    async fn snapshot_loop_emits_periodic_world_snapshot() {
+        let hub = MultiplayerHub::new();
+        let mut rx = hub.subscribe();
+        let player = hub
+            .add_player("user-a".to_string(), "world-main".to_string())
+            .await;
+
+        let result = timeout(Duration::from_millis(250), async {
+            loop {
+                let received = rx.recv().await.expect("state snapshot message");
+                match received {
+                    ServerMultiplayerMessage::StateSnapshot { world_id, players } => {
+                        if world_id == "world-main"
+                            && players
+                                .iter()
+                                .any(|item| item.player_id == player.player_id)
+                        {
+                            return;
+                        }
+                    }
+                    _ => continue,
+                }
+            }
+        })
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "expected periodic state snapshot within 250ms"
+        );
     }
 
     #[tokio::test]
