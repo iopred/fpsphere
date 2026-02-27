@@ -361,3 +361,75 @@ Then merge for integration sprint:
 - [x] Slim server/client payloads for commit success and multiplayer snapshots.
 - [x] Enforce backend leaf-only sphere delete semantics to preserve parent references.
 - [x] Record M1 demo script and acceptance evidence ([docs/sprint-1-closeout.md](docs/sprint-1-closeout.md)).
+
+## 12. Sprint 2 Plan (M2 Authoritative Movement)
+
+Sprint window: 2026-03-02 to 2026-03-13  
+Goal: deliver authoritative multiplayer player movement with client prediction/reconciliation.
+
+### 12.1 Sprint 2 Task IDs
+
+#### S2-A Backend Authority
+
+- [ ] `S2-A1` Add fixed server simulation tick loop for connected players (60 Hz target).
+- [ ] `S2-A2` Introduce authoritative player-state store keyed by `world_id` + `player_id`.
+- [ ] `S2-A3` Process queued client input by sequence/order (drop stale/duplicate input).
+- [ ] `S2-A4` Emit authoritative snapshots containing:
+  - server tick
+  - per-player pose (`position`, `yaw`, `pitch`)
+  - last processed input sequence per player (for reconciliation)
+- [ ] `S2-A5` Add deterministic backend tests for input ordering and state evolution.
+
+#### S2-B Frontend Netcode
+
+- [ ] `S2-B1` Add input sequence numbering on outgoing local player updates.
+- [ ] `S2-B2` Implement client-side local prediction buffer.
+- [ ] `S2-B3` Implement reconciliation against authoritative snapshots using last-acked input sequence.
+- [ ] `S2-B4` Add remote-player interpolation/smoothing layer for snapshot deltas.
+- [ ] `S2-B5` Keep remote orientation wired (`yaw`, `pitch`) with a mesh-ready render adapter boundary.
+
+#### S2-C Protocol + Quality
+
+- [ ] `S2-C1` Update protocol docs and shared/frontend backend-facing interfaces for new snapshot envelope.
+- [ ] `S2-C2` Add integration tests for drift bounds under normal latency simulation.
+- [ ] `S2-C3` Add regression tests for multiplayer world switching/filtering behavior.
+- [ ] `S2-C4` Produce Sprint 2 demo checklist and closeout evidence artifact.
+
+### 12.2 Sprint 2 Acceptance Tests
+
+Automated acceptance:
+
+1. Backend correctness:
+   - `cargo test` passes with new authority/reconciliation test coverage.
+   - Includes tests for:
+     - monotonic input sequence handling
+     - stale/duplicate input rejection
+     - deterministic server tick stepping
+2. Frontend correctness:
+   - `npm --workspace frontend run typecheck` passes.
+   - `npm --workspace frontend run test:frontend` passes with new multiplayer netcode tests.
+3. Protocol consistency:
+   - Snapshot and input contracts documented in `docs/protocol.md`.
+   - Frontend client types align with backend payloads.
+
+Manual acceptance:
+
+1. Two-browser authoritative sync:
+   - Start backend and frontend.
+   - Connect two clients to same world.
+   - Move both players simultaneously.
+   - Confirm both clients converge to server-authoritative positions (no persistent divergence).
+2. Reconciliation behavior:
+   - During continuous movement, local motion remains responsive.
+   - Reconciliation corrections are visible but controlled (no extreme teleport jitter).
+3. Remote smoothing behavior:
+   - Remote players appear smooth under normal local dev latency.
+   - Orientation updates (`yaw`, `pitch`) remain stable for future mesh-based avatars.
+
+### 12.3 Sprint 2 Definition of Done
+
+- Authoritative server movement loop is active for multiplayer players.
+- Client prediction and reconciliation are implemented for local player.
+- Remote players are interpolated/smoothed from authoritative snapshots.
+- Protocol and tests are updated to prevent drift/regression.
+- Demo and evidence are recorded in a Sprint 2 closeout artifact.
