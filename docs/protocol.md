@@ -130,12 +130,14 @@ Server -> client:
 {
   "type": "state_snapshot",
   "world_id": "world-main",
+  "server_tick": 99,
   "players": [
     {
       "player_id": "player-2",
       "position_3d": [3.0, 1.0, 8.0],
       "yaw": 0.0,
-      "pitch": 0.0
+      "pitch": 0.0,
+      "last_processed_input_tick": 17
     }
   ]
 }

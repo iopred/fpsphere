@@ -373,12 +373,12 @@ Goal: deliver authoritative multiplayer player movement with client prediction/r
 
 - [x] `S2-A1` Add fixed server simulation tick loop for connected players (60 Hz target).
 - [x] `S2-A2` Introduce authoritative player-state store keyed by `world_id` + `player_id`.
-- [ ] `S2-A3` Process queued client input by sequence/order (drop stale/duplicate input).
-- [ ] `S2-A4` Emit authoritative snapshots containing:
+- [x] `S2-A3` Process queued client input by sequence/order (drop stale/duplicate input).
+- [x] `S2-A4` Emit authoritative snapshots containing:
   - server tick
   - per-player pose (`position`, `yaw`, `pitch`)
   - last processed input sequence per player (for reconciliation)
-- [ ] `S2-A5` Add deterministic backend tests for input ordering and state evolution.
+- [x] `S2-A5` Add deterministic backend tests for input ordering and state evolution.
 
 #### S2-B Frontend Netcode
 

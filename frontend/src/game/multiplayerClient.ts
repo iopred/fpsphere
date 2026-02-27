@@ -5,10 +5,12 @@ export interface RemotePlayerState {
   position_3d: [number, number, number];
   yaw: number;
   pitch: number;
+  last_processed_input_tick: number;
 }
 
 export interface MultiplayerSnapshot {
   world_id: string;
+  server_tick: number;
   players: RemotePlayerState[];
 }
 

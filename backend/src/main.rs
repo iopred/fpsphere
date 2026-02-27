@@ -7,7 +7,9 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use multiplayer::{ClientMultiplayerMessage, MultiplayerHub, ServerMultiplayerMessage};
+use multiplayer::{
+    ClientMultiplayerMessage, MultiplayerHub, PlayerInputEnqueueResult, ServerMultiplayerMessage,
+};
 use protocol::{
     example_world_snapshot, CommitFailure, CommitRequest, CommitResponse, CommitTarget,
     WorldMutationFailure, WorldRepository, WorldSnapshot,
@@ -357,10 +359,11 @@ async fn handle_ws_connection(
             }
             outbound = rx.recv() => {
                 match outbound {
-                    Ok(ServerMultiplayerMessage::StateSnapshot { world_id: snapshot_world_id, players }) => {
+                    Ok(ServerMultiplayerMessage::StateSnapshot { world_id: snapshot_world_id, server_tick, players }) => {
                         if snapshot_world_id == world_id {
                             let snapshot = ServerMultiplayerMessage::StateSnapshot {
                                 world_id: snapshot_world_id,
+                                server_tick,
                                 players,
                             };
                             if send_ws_message(&mut socket, &snapshot).await.is_err() {
@@ -466,11 +469,12 @@ async fn handle_client_message(
             pitch,
             client_tick,
         } => {
-            let updated = state
+            let update_result = state
                 .multiplayer
                 .update_player(player_id, position_3d, yaw, pitch, client_tick)
                 .await;
-            if !updated {
+
+            if matches!(update_result, PlayerInputEnqueueResult::PlayerMissing) {
                 let warning = ServerMultiplayerMessage::Error {
                     message: "player session no longer exists".to_string(),
                 };
