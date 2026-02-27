@@ -3,14 +3,14 @@
 ## 0. Build Status Tracker
 
 - [x] M0: Foundations
-- [ ] M1: Local Playable Sphere
+- [x] M1: Local Playable Sphere
 - [ ] M2: Multiplayer Slice
 - [ ] M3: Scale and Dimensional Features
 - [x] C1: Rendering app shell
 - [x] C2: FPS controller
-- [ ] C3: Sphere physics integration
-- [ ] C4: Overlay rendering
-- [ ] C5: M1 playable assembly
+- [x] C3: Sphere physics integration
+- [x] C4: Overlay rendering
+- [x] C5: M1 playable assembly
 - [x] C6: Editor mode interactions
 
 ## 1. Project Intent
@@ -91,7 +91,7 @@ Exit criteria:
 - `backend` Rust service runs health endpoint.
 - Shared schema compiles in both environments.
 
-## [ ] M1: Local Playable Sphere (2-4 weeks)
+## [x] M1: Local Playable Sphere (2-4 weeks)
 - Implement single-sphere world load and nested sphere objects.
 - Implement local FPS controller + collisions.
 - Implement basic dimensional overlay (money -> blue intensity).
@@ -100,22 +100,28 @@ Exit criteria:
 - Provide deterministic tick/update loop.
 
 Exit criteria:
-- User can move/jump in browser.
-- Collisions against nested spheres are stable.
-- Toggle overlay mode and observe colorized dimension data.
-- User can press `~` to enter/exit editor mode.
-- In editor mode:
-  - `C` creates a sphere in front of player and auto-selects it.
-  - `Q` deselects selected sphere.
-  - `E` selects looked-at sphere via raycast.
-  - `Z` deletes selected sphere.
-- Shortcut behavior is validated for both QWERTY and Dvorak keyboard layouts.
-- Scene is sourced from datastore model (not hardcoded mesh-only).
+- [x] User can move/jump in browser.
+- [x] Collisions against nested spheres are stable.
+- [x] Toggle overlay mode and observe colorized dimension data.
+- [x] User can press `~` to enter/exit editor mode.
+- [x] In editor mode:
+  - [x] `C` creates a sphere in front of player and auto-selects it.
+  - [x] `Q` deselects selected sphere.
+  - [x] `E` selects looked-at sphere via raycast.
+  - [x] `Z` deletes selected sphere.
+- [x] Shortcut behavior is validated for both QWERTY and Dvorak keyboard layouts.
+- [x] Scene is sourced from datastore model (not hardcoded mesh-only).
 
 ## [ ] M2: Multiplayer Slice (3-5 weeks)
 - Authoritative Rust simulation loop for basic movement state.
 - Client prediction/reconciliation prototype.
 - Snapshot/state sync for sphere entities.
+
+Current implementation status:
+- [x] WebSocket multiplayer transport with per-world filtering.
+- [x] Remote player state snapshots (position + orientation) to connected clients.
+- [x] World commit broadcasts and client-side world hydration sync.
+- [ ] Authoritative simulation loop and reconciliation remain to be implemented.
 
 Exit criteria:
 - Two clients can connect and observe synchronized movement in same sphere space.
@@ -165,14 +171,14 @@ Delivers: adapter interfaces + mock implementation
 
 ## Workstream B: Frontend Data Store Runtime (TypeScript)
 
-### [ ] B1. Shared entity schema in TS
+### [x] B1. Shared entity schema in TS
 - Create strongly typed `SphereEntity`, dimension maps, and version/time metadata.
 - Validation/codec layer (runtime-safe parse).
 
 Depends on: M0 setup  
 Delivers: `packages/shared-types` or equivalent
 
-### [ ] B2. Query + scene graph transform
+### [x] B2. Query + scene graph transform
 - Convert datastore entities to scene graph nodes.
 - Preserve parent-child sphere relationships.
 - Generate render payloads and physics payloads from same source.
@@ -180,7 +186,7 @@ Delivers: `packages/shared-types` or equivalent
 Depends on: B1  
 Delivers: transform pipeline + tests
 
-### [ ] B3. Dimensional overlay pipeline
+### [x] B3. Dimensional overlay pipeline
 - Implement dimension selector (e.g., `money`).
 - Map dimension scalar to color intensity/gradient.
 - Expose overlay uniforms/material params for renderer.
@@ -219,21 +225,21 @@ Delivers: bootable client app
 Depends on: C1  
 Delivers: player controller module
 
-### [ ] C3. Sphere physics integration
+### [x] C3. Sphere physics integration
 - Consume physics payloads from datastore transform.
 - Resolve player-to-sphere and sphere-to-sphere collisions (M1 fidelity).
 
 Depends on: C1, C2, B2  
 Delivers: local physics integration
 
-### [ ] C4. Overlay rendering
+### [x] C4. Overlay rendering
 - Material/shader path for dimensional color overlay.
 - Runtime toggle between base view and selected overlay.
 
 Depends on: C1, B3  
 Delivers: overlay rendering controls
 
-### [ ] C5. M1 playable assembly
+### [x] C5. M1 playable assembly
 - Wire C2+C3+C4 with test world data.
 - Add on-screen debug HUD (tick, collisions, overlay dimension).
 
@@ -272,6 +278,8 @@ Delivers: editable in-world sphere workflow
   - Dvorak layout
 
 ## 7. Definition of Done (Milestone 1)
+
+Status: achieved in the current prototype build.
 
 - Playable browser FPS in one parent sphere scene.
 - Nested spheres block movement via collision.
@@ -343,7 +351,13 @@ Then merge for integration sprint:
 - [x] Add frontend save shortcut (`Cmd/Ctrl+S`) for commit submission.
 - [x] Add WebSocket multiplayer transport and remote player snapshots.
 - [x] Add client-side subworld instancing from sphere dimensions (`world_template`, `world_scale`).
+- [x] Add shared template-root workflow and backend compaction of legacy template descendants.
 - [x] Implement editor mode toggle with `~`.
 - [x] Implement edit shortcuts in editor mode: `C`, `Q`, `E`, `Z`.
+- [x] Add editor transform tools (wheel radius + right-mouse drag).
+- [x] Add level manager HUD for world list/create/delete/select flows.
 - [x] Add layout-aware keybinding tests for Dvorak and QWERTY.
+- [x] Add AR marker viewer mode and QR marker print mode.
+- [x] Slim server/client payloads for commit success and multiplayer snapshots.
+- [x] Enforce backend leaf-only sphere delete semantics to preserve parent references.
 - [ ] Record M1 demo script and acceptance evidence.

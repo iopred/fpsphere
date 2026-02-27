@@ -1,6 +1,6 @@
 # FPSphere
 
-Initial implementation scaffold for:
+Current implementation includes:
 - Web FPS client in TypeScript + Three.js
 - Rust backend service
 - Shared multidimensional sphere entity contract
@@ -83,11 +83,22 @@ Initial implementation scaffold for:
 
 ## Current milestone status
 
-- M0 bootstrap in progress:
-  - shared schema package
-  - frontend app shell
-  - backend service stub
-- M1 local playable slice started:
-  - FPS controls
-  - sphere collisions
-  - overlay toggle for `money` dimension
+- M0 foundations: complete.
+- M1 local playable sphere: complete.
+  - FPS controls, fixed-step simulation, and sphere collision resolution.
+  - Overlay toggle for `money` dimension.
+  - In-world editor mode with select/create/delete, drag, radius edit, and template controls.
+  - Backend world load/commit integration with save shortcut (`Cmd/Ctrl+S`).
+- M2 multiplayer slice: in progress.
+  - WebSocket multiplayer presence and remote player sync.
+  - World commit broadcast/sync to connected clients.
+  - Orientation (`yaw`, `pitch`) included in player snapshots for upcoming mesh-based remote avatars.
+- Additional shipped features:
+  - Level management (list/create/delete/switch worlds from editor HUD).
+  - Template-driven subworld instancing (`world_template`, `world_scale`) with shared template roots.
+  - Legacy template descendant compaction in backend snapshots/commits.
+  - QR marker print mode and mobile AR marker viewer mode.
+  - Simplified payloads:
+    - commit success responses now include `commit_id`, `saved_to`, `reason`, and `world`.
+    - multiplayer state snapshots include `world_id` and per-player `player_id`, `position_3d`, `yaw`, `pitch`.
+  - Backend delete semantics now reject deleting non-leaf spheres (prevents orphaned parent references).
