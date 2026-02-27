@@ -71,11 +71,36 @@ interface SphereColorChannels {
   b: number;
 }
 
+interface PredictedInputState {
+  sequence: number;
+  simulationTick: number;
+  position3d: [number, number, number];
+  yaw: number;
+  pitch: number;
+}
+
+interface RemotePlayerRenderState {
+  renderPosition: THREE.Vector3;
+  targetPosition: THREE.Vector3;
+  renderYaw: number;
+  targetYaw: number;
+  renderPitch: number;
+  targetPitch: number;
+  lastServerTick: number;
+}
+
 const tempForward = new THREE.Vector3();
 const tempOffset = new THREE.Vector3();
 const tempDragTarget = new THREE.Vector3();
 const tempRaycastPoint = new THREE.Vector2(0, 0);
 const tempLookEuler = new THREE.Euler(0, 0, 0, "YXZ");
+const MAX_PENDING_PREDICTED_INPUTS = 512;
+const RECONCILE_POSITION_EPSILON = 0.0001;
+const REMOTE_INTERPOLATION_SMOOTH_TIME_SECONDS = 0.085;
+const REMOTE_INTERPOLATION_SNAP_DISTANCE = 5;
+const REMOTE_INTERPOLATION_SNAP_ANGLE_RADIANS = Math.PI * 0.75;
+const REMOTE_INTERPOLATION_MAX_FRAME_SECONDS = 0.1;
+const TWO_PI = Math.PI * 2;
 
 export class GameApp {
   private readonly scene = new THREE.Scene();
@@ -124,7 +149,7 @@ export class GameApp {
   private readonly obstacleMeshes = new Map<string, THREE.Mesh>();
   private readonly obstacleBodiesById = new Map<string, ObstacleBody>();
   private readonly multiplayerClient = new MultiplayerClient();
-  private readonly remotePlayers = new Map<string, RemotePlayerState>();
+  private readonly remotePlayerRenderStates = new Map<string, RemotePlayerRenderState>();
   private readonly remotePlayerMeshes = new Map<string, THREE.Mesh>();
   private readonly templateIdChoices = [
     TEMPLATE_NONE_ID,
@@ -158,6 +183,10 @@ export class GameApp {
   private multiplayerError: string | null = null;
   private lastNetworkSendTick = 0;
   private nextInputSequence = 0;
+  private readonly pendingPredictedInputs = new Map<number, PredictedInputState>();
+  private lastAckedInputSequence = 0;
+  private lastSnapshotServerTick = 0;
+  private lastReconciliationError = 0;
   private worldSourceState: "seed" | "loading" | "backend" | "backend-user" = "loading";
   private disposed = false;
 
@@ -1562,6 +1591,10 @@ export class GameApp {
     this.localPlayerId = null;
     this.multiplayerError = null;
     this.nextInputSequence = 0;
+    this.lastAckedInputSequence = 0;
+    this.lastSnapshotServerTick = 0;
+    this.lastReconciliationError = 0;
+    this.pendingPredictedInputs.clear();
     this.clearRemotePlayers();
 
     this.multiplayerClient.connect({
@@ -1597,22 +1630,28 @@ export class GameApp {
       return;
     }
 
+    this.applyLocalPredictionAck(snapshot);
+
     const nextIds = new Set<string>();
     for (const remotePlayer of snapshot.players) {
       if (remotePlayer.player_id === this.localPlayerId) {
         continue;
       }
 
-      nextIds.add(remotePlayer.player_id);
-      this.remotePlayers.set(remotePlayer.player_id, remotePlayer);
-      this.upsertRemotePlayerMesh(remotePlayer);
+      const playerId = remotePlayer.player_id;
+      nextIds.add(playerId);
+      const renderState = this.upsertRemotePlayerRenderState(
+        remotePlayer,
+        snapshot.server_tick,
+      );
+      this.upsertRemotePlayerMesh(playerId, renderState);
     }
 
-    for (const existingId of [...this.remotePlayers.keys()]) {
+    for (const existingId of [...this.remotePlayerRenderStates.keys()]) {
       if (nextIds.has(existingId)) {
         continue;
       }
-      this.remotePlayers.delete(existingId);
+      this.remotePlayerRenderStates.delete(existingId);
       this.removeRemotePlayerMesh(existingId);
     }
   }
@@ -1647,13 +1686,267 @@ export class GameApp {
     }
   }
 
-  private upsertRemotePlayerMesh(remotePlayer: RemotePlayerState): void {
-    const existingMesh = this.remotePlayerMeshes.get(remotePlayer.player_id);
-    if (existingMesh) {
-      existingMesh.position.set(
+  private applyLocalPredictionAck(snapshot: MultiplayerSnapshot): void {
+    if (!this.localPlayerId) {
+      return;
+    }
+
+    this.lastSnapshotServerTick = snapshot.server_tick;
+    const localPlayer = snapshot.players.find(
+      (player) => player.player_id === this.localPlayerId,
+    );
+    if (!localPlayer) {
+      return;
+    }
+
+    const rawAck = localPlayer.last_processed_input_tick;
+    if (!Number.isFinite(rawAck) || rawAck < 0) {
+      return;
+    }
+
+    const ackSequence = Math.max(
+      this.lastAckedInputSequence,
+      Math.trunc(rawAck),
+    );
+
+    this.reconcileLocalPrediction(ackSequence, localPlayer);
+    this.lastAckedInputSequence = ackSequence;
+    this.prunePredictedInputBuffer();
+  }
+
+  private reconcileLocalPrediction(
+    ackSequence: number,
+    localPlayerSnapshot: RemotePlayerState,
+  ): void {
+    const authoritativePosition = localPlayerSnapshot.position_3d;
+    const acknowledgedPrediction = this.pendingPredictedInputs.get(ackSequence);
+
+    if (!acknowledgedPrediction) {
+      if (this.pendingPredictedInputs.size === 0) {
+        const deltaX = authoritativePosition[0] - this.player.position.x;
+        const deltaY = authoritativePosition[1] - this.player.position.y;
+        const deltaZ = authoritativePosition[2] - this.player.position.z;
+        const error = Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
+        this.lastReconciliationError = error;
+
+        if (error > RECONCILE_POSITION_EPSILON) {
+          this.player.position.set(
+            authoritativePosition[0],
+            authoritativePosition[1],
+            authoritativePosition[2],
+          );
+        }
+      }
+      return;
+    }
+
+    const deltaX = authoritativePosition[0] - acknowledgedPrediction.position3d[0];
+    const deltaY = authoritativePosition[1] - acknowledgedPrediction.position3d[1];
+    const deltaZ = authoritativePosition[2] - acknowledgedPrediction.position3d[2];
+    const error = Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
+    this.lastReconciliationError = error;
+
+    if (error <= RECONCILE_POSITION_EPSILON) {
+      return;
+    }
+
+    this.player.position.set(
+      this.player.position.x + deltaX,
+      this.player.position.y + deltaY,
+      this.player.position.z + deltaZ,
+    );
+
+    for (const [sequence, predicted] of this.pendingPredictedInputs) {
+      if (sequence <= ackSequence) {
+        continue;
+      }
+
+      predicted.position3d = [
+        predicted.position3d[0] + deltaX,
+        predicted.position3d[1] + deltaY,
+        predicted.position3d[2] + deltaZ,
+      ];
+    }
+  }
+
+  private prunePredictedInputBuffer(): void {
+    for (const sequence of [...this.pendingPredictedInputs.keys()]) {
+      if (sequence <= this.lastAckedInputSequence) {
+        this.pendingPredictedInputs.delete(sequence);
+      }
+    }
+
+    while (this.pendingPredictedInputs.size > MAX_PENDING_PREDICTED_INPUTS) {
+      const oldest = this.pendingPredictedInputs.keys().next().value;
+      if (typeof oldest !== "number") {
+        break;
+      }
+      this.pendingPredictedInputs.delete(oldest);
+    }
+  }
+
+  private recordPredictedInput(state: PredictedInputState): void {
+    this.pendingPredictedInputs.set(state.sequence, state);
+    this.prunePredictedInputBuffer();
+  }
+
+  private upsertRemotePlayerRenderState(
+    remotePlayer: RemotePlayerState,
+    serverTick: number,
+  ): RemotePlayerRenderState {
+    const playerId = remotePlayer.player_id;
+    const normalizedServerTick = Number.isFinite(serverTick) ? Math.trunc(serverTick) : 0;
+    const existingState = this.remotePlayerRenderStates.get(playerId);
+    if (!existingState) {
+      const spawnPosition = new THREE.Vector3(
         remotePlayer.position_3d[0],
         remotePlayer.position_3d[1],
         remotePlayer.position_3d[2],
+      );
+      const normalizedYaw = this.normalizeAngleRadians(remotePlayer.yaw);
+      const normalizedPitch = this.normalizeAngleRadians(remotePlayer.pitch);
+      const createdState: RemotePlayerRenderState = {
+        renderPosition: spawnPosition.clone(),
+        targetPosition: spawnPosition,
+        renderYaw: normalizedYaw,
+        targetYaw: normalizedYaw,
+        renderPitch: normalizedPitch,
+        targetPitch: normalizedPitch,
+        lastServerTick: normalizedServerTick,
+      };
+      this.remotePlayerRenderStates.set(playerId, createdState);
+      return createdState;
+    }
+
+    if (normalizedServerTick < existingState.lastServerTick) {
+      return existingState;
+    }
+
+    existingState.targetPosition.set(
+      remotePlayer.position_3d[0],
+      remotePlayer.position_3d[1],
+      remotePlayer.position_3d[2],
+    );
+    existingState.targetYaw = this.normalizeAngleRadians(remotePlayer.yaw);
+    existingState.targetPitch = this.normalizeAngleRadians(remotePlayer.pitch);
+    existingState.lastServerTick = normalizedServerTick;
+    return existingState;
+  }
+
+  private updateRemotePlayerInterpolation(frameSeconds: number): void {
+    if (this.remotePlayerRenderStates.size === 0) {
+      return;
+    }
+
+    const interpolationAlpha = this.remoteInterpolationAlpha(frameSeconds);
+    if (interpolationAlpha <= 0) {
+      return;
+    }
+
+    for (const [playerId, renderState] of this.remotePlayerRenderStates) {
+      const mesh = this.remotePlayerMeshes.get(playerId);
+      if (!mesh) {
+        continue;
+      }
+
+      if (
+        renderState.renderPosition.distanceTo(renderState.targetPosition) >
+        REMOTE_INTERPOLATION_SNAP_DISTANCE
+      ) {
+        renderState.renderPosition.copy(renderState.targetPosition);
+      } else {
+        renderState.renderPosition.lerp(
+          renderState.targetPosition,
+          interpolationAlpha,
+        );
+      }
+
+      renderState.renderYaw = this.interpolateAngleRadians(
+        renderState.renderYaw,
+        renderState.targetYaw,
+        interpolationAlpha,
+      );
+      renderState.renderPitch = this.interpolateAngleRadians(
+        renderState.renderPitch,
+        renderState.targetPitch,
+        interpolationAlpha,
+      );
+
+      this.applyRemotePlayerRenderPose(
+        mesh,
+        renderState.renderPosition,
+        renderState.renderYaw,
+        renderState.renderPitch,
+      );
+    }
+  }
+
+  private remoteInterpolationAlpha(frameSeconds: number): number {
+    const boundedFrameSeconds = Math.max(
+      0,
+      Math.min(frameSeconds, REMOTE_INTERPOLATION_MAX_FRAME_SECONDS),
+    );
+    if (boundedFrameSeconds <= 0) {
+      return 0;
+    }
+
+    return (
+      1 -
+      Math.exp(
+        -boundedFrameSeconds / REMOTE_INTERPOLATION_SMOOTH_TIME_SECONDS,
+      )
+    );
+  }
+
+  private normalizeAngleRadians(angle: number): number {
+    if (!Number.isFinite(angle)) {
+      return 0;
+    }
+
+    let normalized = (angle + Math.PI) % TWO_PI;
+    if (normalized < 0) {
+      normalized += TWO_PI;
+    }
+    return normalized - Math.PI;
+  }
+
+  private interpolateAngleRadians(
+    current: number,
+    target: number,
+    alpha: number,
+  ): number {
+    const normalizedCurrent = this.normalizeAngleRadians(current);
+    const normalizedTarget = this.normalizeAngleRadians(target);
+    const delta = this.normalizeAngleRadians(normalizedTarget - normalizedCurrent);
+    if (Math.abs(delta) > REMOTE_INTERPOLATION_SNAP_ANGLE_RADIANS) {
+      return normalizedTarget;
+    }
+    return this.normalizeAngleRadians(normalizedCurrent + delta * alpha);
+  }
+
+  private applyRemotePlayerRenderPose(
+    object3d: THREE.Object3D,
+    position: THREE.Vector3,
+    yaw: number,
+    pitch: number,
+  ): void {
+    object3d.position.copy(position);
+    object3d.rotation.order = "YXZ";
+    object3d.rotation.y = yaw;
+    object3d.rotation.x = pitch;
+  }
+
+  private upsertRemotePlayerMesh(
+    playerId: string,
+    renderState: RemotePlayerRenderState,
+  ): void {
+    const existingMesh = this.remotePlayerMeshes.get(playerId);
+    if (existingMesh) {
+      this.applyRemotePlayerRenderPose(
+        existingMesh,
+        renderState.renderPosition,
+        renderState.renderYaw,
+        renderState.renderPitch,
       );
       return;
     }
@@ -1667,13 +1960,14 @@ export class GameApp {
     });
 
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(
-      remotePlayer.position_3d[0],
-      remotePlayer.position_3d[1],
-      remotePlayer.position_3d[2],
+    this.applyRemotePlayerRenderPose(
+      mesh,
+      renderState.renderPosition,
+      renderState.renderYaw,
+      renderState.renderPitch,
     );
     this.scene.add(mesh);
-    this.remotePlayerMeshes.set(remotePlayer.player_id, mesh);
+    this.remotePlayerMeshes.set(playerId, mesh);
   }
 
   private removeRemotePlayerMesh(playerId: string): void {
@@ -1698,7 +1992,7 @@ export class GameApp {
     for (const playerId of [...this.remotePlayerMeshes.keys()]) {
       this.removeRemotePlayerMesh(playerId);
     }
-    this.remotePlayers.clear();
+    this.remotePlayerRenderStates.clear();
   }
 
   private addObstacleMesh(
@@ -1995,6 +2289,7 @@ export class GameApp {
       this.accumulatorSeconds -= FIXED_STEP_SECONDS;
     }
 
+    this.updateRemotePlayerInterpolation(frameSeconds);
     this.syncCamera();
     this.updateHud();
     this.renderer.render(this.scene, this.camera);
@@ -2047,6 +2342,13 @@ export class GameApp {
     if (this.tick - this.lastNetworkSendTick >= NETWORK_SEND_INTERVAL_TICKS) {
       const orientation = this.controller.getOrientation();
       const inputSequence = this.nextPlayerInputSequence();
+      this.recordPredictedInput({
+        sequence: inputSequence,
+        simulationTick: this.tick,
+        position3d: [this.player.position.x, this.player.position.y, this.player.position.z],
+        yaw: orientation.yaw,
+        pitch: orientation.pitch,
+      });
       this.multiplayerClient.sendPlayerUpdate(
         [this.player.position.x, this.player.position.y, this.player.position.z],
         orientation.yaw,
@@ -2322,7 +2624,11 @@ export class GameApp {
       `user: ${this.userId}\n` +
       `multiplayer: ${this.multiplayerStatus}\n` +
       `player id: ${this.localPlayerId ?? "pending"}\n` +
-      `remote players: ${this.remotePlayers.size}\n` +
+      `remote players: ${this.remotePlayerRenderStates.size}\n` +
+      `input seq ack: ${this.lastAckedInputSequence}\n` +
+      `pending predicted inputs: ${this.pendingPredictedInputs.size}\n` +
+      `last snapshot tick: ${this.lastSnapshotServerTick}\n` +
+      `reconcile error: ${this.lastReconciliationError.toFixed(4)}\n` +
       `mp error: ${this.multiplayerError ?? "none"}`;
   }
 }

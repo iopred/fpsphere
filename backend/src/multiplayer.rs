@@ -670,6 +670,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn world_switch_via_remove_and_rejoin_does_not_leak_old_world_membership() {
+        let hub = MultiplayerHub::new_without_snapshot_loop();
+        let mut rx = hub.subscribe();
+
+        let original = hub
+            .add_player("user-switch".to_string(), "world-main".to_string())
+            .await;
+        hub.remove_player(&original.player_id).await;
+
+        let switched = hub
+            .add_player("user-switch".to_string(), "world-beta".to_string())
+            .await;
+
+        hub.broadcast_world_snapshot("world-main").await;
+        hub.broadcast_world_snapshot("world-beta").await;
+
+        let result = timeout(Duration::from_millis(300), async {
+            let mut saw_world_main = false;
+            let mut saw_world_beta = false;
+
+            loop {
+                if saw_world_main && saw_world_beta {
+                    return;
+                }
+
+                let received = rx.recv().await.expect("state snapshot message");
+                match received {
+                    ServerMultiplayerMessage::StateSnapshot {
+                        world_id, players, ..
+                    } => {
+                        if world_id == "world-main" {
+                            assert!(
+                                players
+                                    .iter()
+                                    .all(|item| item.player_id != original.player_id),
+                                "removed player must not remain in prior world snapshot"
+                            );
+                            assert!(
+                                players
+                                    .iter()
+                                    .all(|item| item.player_id != switched.player_id),
+                                "new player id must not appear in unrelated world snapshot"
+                            );
+                            saw_world_main = true;
+                            continue;
+                        }
+
+                        if world_id == "world-beta" {
+                            assert!(
+                                players
+                                    .iter()
+                                    .any(|item| item.player_id == switched.player_id),
+                                "rejoined player must appear in new world snapshot"
+                            );
+                            assert!(
+                                players
+                                    .iter()
+                                    .all(|item| item.player_id != original.player_id),
+                                "old player id must not leak into new world snapshot"
+                            );
+                            saw_world_beta = true;
+                        }
+                    }
+                    _ => continue,
+                }
+            }
+        })
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "expected clean world switch snapshot behavior within 300ms"
+        );
+    }
+
+    #[tokio::test]
     async fn world_commit_broadcast_emits_message() {
         let hub = MultiplayerHub::new();
         let mut rx = hub.subscribe();

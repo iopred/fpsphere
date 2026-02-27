@@ -90,9 +90,10 @@ Current implementation includes:
   - In-world editor mode with select/create/delete, drag, radius edit, and template controls.
   - Backend world load/commit integration with save shortcut (`Cmd/Ctrl+S`).
 - M2 multiplayer slice: in progress.
-  - WebSocket multiplayer presence and remote player sync.
+  - Authoritative server snapshots now include `server_tick` and per-player `last_processed_input_tick`.
+  - Client input sequencing + local prediction/reconciliation are active for the local player.
+  - Remote players use interpolated smoothing, with `yaw`/`pitch` kept on a mesh-ready render-pose boundary.
   - World commit broadcast/sync to connected clients.
-  - Orientation (`yaw`, `pitch`) included in player snapshots for upcoming mesh-based remote avatars.
 - Additional shipped features:
   - Level management (list/create/delete/switch worlds from editor HUD).
   - Template-driven subworld instancing (`world_template`, `world_scale`) with shared template roots.
@@ -100,6 +101,6 @@ Current implementation includes:
   - QR marker print mode and mobile AR marker viewer mode.
   - Simplified payloads:
     - commit success responses now include `commit_id`, `saved_to`, `reason`, and `world`.
-    - multiplayer state snapshots include `world_id` and per-player `player_id`, `position_3d`, `yaw`, `pitch`.
+    - multiplayer state snapshots include `world_id`, `server_tick`, and per-player `player_id`, `position_3d`, `yaw`, `pitch`, `last_processed_input_tick`.
   - Backend delete semantics now reject deleting non-leaf spheres (prevents orphaned parent references).
   - Sprint 1 closeout artifact with acceptance evidence: [docs/sprint-1-closeout.md](docs/sprint-1-closeout.md).

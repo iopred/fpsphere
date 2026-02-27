@@ -383,16 +383,16 @@ Goal: deliver authoritative multiplayer player movement with client prediction/r
 #### S2-B Frontend Netcode
 
 - [x] `S2-B1` Add input sequence numbering on outgoing local player updates.
-- [ ] `S2-B2` Implement client-side local prediction buffer.
-- [ ] `S2-B3` Implement reconciliation against authoritative snapshots using last-acked input sequence.
-- [ ] `S2-B4` Add remote-player interpolation/smoothing layer for snapshot deltas.
-- [ ] `S2-B5` Keep remote orientation wired (`yaw`, `pitch`) with a mesh-ready render adapter boundary.
+- [x] `S2-B2` Implement client-side local prediction buffer.
+- [x] `S2-B3` Implement reconciliation against authoritative snapshots using last-acked input sequence.
+- [x] `S2-B4` Add remote-player interpolation/smoothing layer for snapshot deltas.
+- [x] `S2-B5` Keep remote orientation wired (`yaw`, `pitch`) with a mesh-ready render adapter boundary.
 
 #### S2-C Protocol + Quality
 
-- [ ] `S2-C1` Update protocol docs and shared/frontend backend-facing interfaces for new snapshot envelope.
+- [x] `S2-C1` Update protocol docs and shared/frontend backend-facing interfaces for new snapshot envelope.
 - [ ] `S2-C2` Add integration tests for drift bounds under normal latency simulation.
-- [ ] `S2-C3` Add regression tests for multiplayer world switching/filtering behavior.
+- [x] `S2-C3` Add regression tests for multiplayer world switching/filtering behavior.
 - [ ] `S2-C4` Produce Sprint 2 demo checklist and closeout evidence artifact.
 
 ### 12.2 Sprint 2 Acceptance Tests
