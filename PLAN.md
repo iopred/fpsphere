@@ -391,9 +391,9 @@ Goal: deliver authoritative multiplayer player movement with client prediction/r
 #### S2-C Protocol + Quality
 
 - [x] `S2-C1` Update protocol docs and shared/frontend backend-facing interfaces for new snapshot envelope.
-- [ ] `S2-C2` Add integration tests for drift bounds under normal latency simulation.
+- [x] `S2-C2` Add integration tests for drift bounds under normal latency simulation.
 - [x] `S2-C3` Add regression tests for multiplayer world switching/filtering behavior.
-- [ ] `S2-C4` Produce Sprint 2 demo checklist and closeout evidence artifact.
+- [x] `S2-C4` Produce Sprint 2 demo checklist and closeout evidence artifact ([docs/sprint-2-closeout.md](docs/sprint-2-closeout.md)).
 
 ### 12.2 Sprint 2 Acceptance Tests
 

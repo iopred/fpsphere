@@ -436,6 +436,7 @@ impl MultiplayerHub {
 mod tests {
     use super::{MultiplayerHub, PlayerInputEnqueueResult, ServerMultiplayerMessage};
     use crate::protocol::{example_world_snapshot, CommitTarget};
+    use std::collections::BTreeMap;
     use tokio::time::{timeout, Duration};
 
     #[tokio::test]
@@ -742,6 +743,85 @@ mod tests {
         assert!(
             result.is_ok(),
             "expected clean world switch snapshot behavior within 300ms"
+        );
+    }
+
+    #[tokio::test]
+    async fn latency_simulation_keeps_authoritative_drift_bounded() {
+        let hub = MultiplayerHub::new_without_snapshot_loop();
+        let mut rx = hub.subscribe();
+        let player = hub
+            .add_player("user-latency".to_string(), "world-main".to_string())
+            .await;
+
+        const TOTAL_INPUT_TICKS: u64 = 120;
+        const SIMULATED_LATENCY_TICKS: u64 = 3;
+        const DRAIN_TICKS: u64 = 8;
+
+        let mut arrivals_by_tick: BTreeMap<u64, u64> = BTreeMap::new();
+        for sequence in 1..=TOTAL_INPUT_TICKS {
+            let arrival_tick = sequence + SIMULATED_LATENCY_TICKS;
+            arrivals_by_tick.insert(arrival_tick, sequence);
+        }
+
+        let simulation_end_tick = TOTAL_INPUT_TICKS + DRAIN_TICKS;
+        let mut max_sequence_drift: u64 = 0;
+
+        for simulation_tick in 1..=simulation_end_tick {
+            if let Some(sequence) = arrivals_by_tick.remove(&simulation_tick) {
+                let enqueue = hub
+                    .update_player(
+                        &player.player_id,
+                        [sequence as f32, 0.0, 0.0],
+                        sequence as f32 * 0.01,
+                        0.0,
+                        sequence,
+                    )
+                    .await;
+                assert!(matches!(enqueue, PlayerInputEnqueueResult::Queued));
+            }
+
+            hub.process_queued_inputs().await;
+            hub.broadcast_world_snapshot("world-main").await;
+
+            let (world_id, players) = timeout(Duration::from_millis(200), async {
+                loop {
+                    let received = rx.recv().await.expect("state snapshot message");
+                    if let ServerMultiplayerMessage::StateSnapshot {
+                        world_id, players, ..
+                    } = received
+                    {
+                        break (world_id, players);
+                    }
+                }
+            })
+            .await
+            .expect("expected state snapshot under latency simulation");
+
+            assert_eq!(world_id, "world-main");
+            let player_snapshot = players
+                .iter()
+                .find(|item| item.player_id == player.player_id)
+                .expect("player should be present in world snapshot");
+
+            let authoritative_sequence = player_snapshot.last_processed_input_tick;
+            let authoritative_x = player_snapshot.position_3d[0];
+            let expected_x = authoritative_sequence as f32;
+            assert!(
+                (authoritative_x - expected_x).abs() <= f32::EPSILON,
+                "authoritative position must match processed sequence-derived input"
+            );
+
+            let client_latest_sequence = simulation_tick.min(TOTAL_INPUT_TICKS);
+            let sequence_drift = client_latest_sequence.saturating_sub(authoritative_sequence);
+            max_sequence_drift = max_sequence_drift.max(sequence_drift);
+        }
+
+        assert!(
+            max_sequence_drift <= SIMULATED_LATENCY_TICKS + 1,
+            "expected sequence drift <= {} under normal latency simulation, observed {}",
+            SIMULATED_LATENCY_TICKS + 1,
+            max_sequence_drift
         );
     }
 

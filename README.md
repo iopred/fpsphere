@@ -104,3 +104,4 @@ Current implementation includes:
     - multiplayer state snapshots include `world_id`, `server_tick`, and per-player `player_id`, `position_3d`, `yaw`, `pitch`, `last_processed_input_tick`.
   - Backend delete semantics now reject deleting non-leaf spheres (prevents orphaned parent references).
   - Sprint 1 closeout artifact with acceptance evidence: [docs/sprint-1-closeout.md](docs/sprint-1-closeout.md).
+  - Sprint 2 closeout artifact with authoritative movement acceptance evidence: [docs/sprint-2-closeout.md](docs/sprint-2-closeout.md).
