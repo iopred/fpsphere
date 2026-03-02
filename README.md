@@ -89,11 +89,14 @@ Current implementation includes:
   - Overlay toggle for `money` dimension.
   - In-world editor mode with select/create/delete, drag, radius edit, and template controls.
   - Backend world load/commit integration with save shortcut (`Cmd/Ctrl+S`).
-- M2 multiplayer slice: in progress.
+- M2 multiplayer slice: complete.
   - Authoritative server snapshots now include `server_tick` and per-player `last_processed_input_tick`.
   - Client input sequencing + local prediction/reconciliation are active for the local player.
   - Remote players use interpolated smoothing, with `yaw`/`pitch` kept on a mesh-ready render-pose boundary.
   - World commit broadcast/sync to connected clients.
+- M3 avatar presence: in progress.
+  - Shared avatar render adapter now used by both FPS and AR remote-player paths.
+  - Default remote avatar now uses orientation-readable mesh parts (body + head + direction marker).
 - Additional shipped features:
   - Level management (list/create/delete/switch worlds from editor HUD).
   - Template-driven subworld instancing (`world_template`, `world_scale`) with shared template roots.

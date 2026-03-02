@@ -8,6 +8,10 @@ import {
   type MultiplayerWorldCommit,
   type RemotePlayerState,
 } from "../game/multiplayerClient";
+import {
+  createRemoteAvatarHandle,
+  type AvatarRenderHandle,
+} from "../game/avatarRenderAdapter";
 import { LocalWorldStore, type WorldStoreSnapshot } from "../game/worldStore";
 import {
   getTemplateRootSphereId,
@@ -33,7 +37,6 @@ const POSE_SLERP_FACTOR = 0.3;
 const WORLD_RENDER_RADIUS_METERS = 0.06;
 const WORLD_RENDER_LIFT_METERS = 0.045;
 const JSQR_CDN_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";
-const REMOTE_PLAYER_RADIUS = 0.9;
 const TEMPLATE_NONE_ID = 0;
 
 interface BarcodeCornerPointLike {
@@ -284,7 +287,7 @@ export class FpsphereArApp {
 
   private readonly multiplayerClient = new MultiplayerClient();
   private readonly remotePlayers = new Map<string, RemotePlayerState>();
-  private readonly remotePlayerMeshes = new Map<string, THREE.Mesh>();
+  private readonly remotePlayerAvatars = new Map<string, AvatarRenderHandle>();
 
   private readonly rootNode: HTMLDivElement;
   private readonly videoNode: HTMLVideoElement;
@@ -716,7 +719,7 @@ export class FpsphereArApp {
     this.markerAnchor.visible = true;
     this.lastMarkerSeenAtMs = performance.now();
     this.updateStatus(
-      `Tracking world "${worldId}" | scale: ${this.currentWorldScaleMultiplier}x | remote players: ${this.remotePlayerMeshes.size} | scanner: ${this.detector?.getDescription() ?? "unknown"}`,
+      `Tracking world "${worldId}" | scale: ${this.currentWorldScaleMultiplier}x | remote players: ${this.remotePlayerAvatars.size} | scanner: ${this.detector?.getDescription() ?? "unknown"}`,
     );
   }
 
@@ -839,50 +842,35 @@ export class FpsphereArApp {
   }
 
   private upsertRemotePlayerMesh(remotePlayer: RemotePlayerState): void {
-    const existingMesh = this.remotePlayerMeshes.get(remotePlayer.player_id);
+    const existingAvatar = this.remotePlayerAvatars.get(remotePlayer.player_id);
     const x = remotePlayer.position_3d[0] - this.parentCenter.x;
     const y = remotePlayer.position_3d[1] - this.parentCenter.y;
     const z = remotePlayer.position_3d[2] - this.parentCenter.z;
 
-    if (existingMesh) {
-      existingMesh.position.set(x, y, z);
+    if (existingAvatar) {
+      existingAvatar.applyPose(x, y, z, remotePlayer.yaw, remotePlayer.pitch);
       return;
     }
 
-    const geometry = new THREE.SphereGeometry(REMOTE_PLAYER_RADIUS, 18, 14);
-    const material = new THREE.MeshStandardMaterial({
-      color: 0x4be29f,
-      emissive: 0x0d5e43,
-      roughness: 0.45,
-      metalness: 0.2,
-    });
-
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(x, y, z);
-    this.worldContentGroup.add(mesh);
-    this.remotePlayerMeshes.set(remotePlayer.player_id, mesh);
+    const avatar = createRemoteAvatarHandle();
+    avatar.applyPose(x, y, z, remotePlayer.yaw, remotePlayer.pitch);
+    this.worldContentGroup.add(avatar.object3d);
+    this.remotePlayerAvatars.set(remotePlayer.player_id, avatar);
   }
 
   private removeRemotePlayerMesh(playerId: string): void {
-    const mesh = this.remotePlayerMeshes.get(playerId);
-    if (!mesh) {
+    const avatar = this.remotePlayerAvatars.get(playerId);
+    if (!avatar) {
       return;
     }
 
-    this.worldContentGroup.remove(mesh);
-    mesh.geometry.dispose();
-    if (Array.isArray(mesh.material)) {
-      for (const material of mesh.material) {
-        material.dispose();
-      }
-    } else {
-      mesh.material.dispose();
-    }
-    this.remotePlayerMeshes.delete(playerId);
+    this.worldContentGroup.remove(avatar.object3d);
+    avatar.dispose();
+    this.remotePlayerAvatars.delete(playerId);
   }
 
   private clearRemotePlayers(): void {
-    for (const playerId of [...this.remotePlayerMeshes.keys()]) {
+    for (const playerId of [...this.remotePlayerAvatars.keys()]) {
       this.removeRemotePlayerMesh(playerId);
     }
     this.remotePlayers.clear();

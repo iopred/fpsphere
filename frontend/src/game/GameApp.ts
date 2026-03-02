@@ -37,6 +37,10 @@ import {
   type RemotePlayerState,
 } from "./multiplayerClient";
 import { LocalWorldStore, type WorldStoreSnapshot } from "./worldStore";
+import {
+  createRemoteAvatarHandle,
+  type AvatarRenderHandle,
+} from "./avatarRenderAdapter";
 
 const FIXED_STEP_SECONDS = 1 / 60;
 const MOVE_SPEED = 18;
@@ -50,7 +54,6 @@ const CREATED_SPHERE_RADIUS = 2.4;
 const CREATE_DISTANCE = 8;
 const CREATE_BOUNDARY_MARGIN = 0.35;
 const DEFAULT_WORLD_ID = "world-main";
-const REMOTE_PLAYER_RADIUS = 0.9;
 const NETWORK_SEND_INTERVAL_TICKS = 2;
 const TEMPLATE_NONE_ID = 0;
 const MIN_EDIT_RADIUS = 0.25;
@@ -150,7 +153,7 @@ export class GameApp {
   private readonly obstacleBodiesById = new Map<string, ObstacleBody>();
   private readonly multiplayerClient = new MultiplayerClient();
   private readonly remotePlayerRenderStates = new Map<string, RemotePlayerRenderState>();
-  private readonly remotePlayerMeshes = new Map<string, THREE.Mesh>();
+  private readonly remotePlayerAvatars = new Map<string, AvatarRenderHandle>();
   private readonly templateIdChoices = [
     TEMPLATE_NONE_ID,
     ...getAvailableSubworldTemplateIds(),
@@ -1844,8 +1847,8 @@ export class GameApp {
     }
 
     for (const [playerId, renderState] of this.remotePlayerRenderStates) {
-      const mesh = this.remotePlayerMeshes.get(playerId);
-      if (!mesh) {
+      const avatar = this.remotePlayerAvatars.get(playerId);
+      if (!avatar) {
         continue;
       }
 
@@ -1873,7 +1876,7 @@ export class GameApp {
       );
 
       this.applyRemotePlayerRenderPose(
-        mesh,
+        avatar,
         renderState.renderPosition,
         renderState.renderYaw,
         renderState.renderPitch,
@@ -1925,25 +1928,22 @@ export class GameApp {
   }
 
   private applyRemotePlayerRenderPose(
-    object3d: THREE.Object3D,
+    avatar: AvatarRenderHandle,
     position: THREE.Vector3,
     yaw: number,
     pitch: number,
   ): void {
-    object3d.position.copy(position);
-    object3d.rotation.order = "YXZ";
-    object3d.rotation.y = yaw;
-    object3d.rotation.x = pitch;
+    avatar.applyPose(position.x, position.y, position.z, yaw, pitch);
   }
 
   private upsertRemotePlayerMesh(
     playerId: string,
     renderState: RemotePlayerRenderState,
   ): void {
-    const existingMesh = this.remotePlayerMeshes.get(playerId);
-    if (existingMesh) {
+    const existingAvatar = this.remotePlayerAvatars.get(playerId);
+    if (existingAvatar) {
       this.applyRemotePlayerRenderPose(
-        existingMesh,
+        existingAvatar,
         renderState.renderPosition,
         renderState.renderYaw,
         renderState.renderPitch,
@@ -1951,45 +1951,30 @@ export class GameApp {
       return;
     }
 
-    const geometry = new THREE.SphereGeometry(REMOTE_PLAYER_RADIUS, 18, 14);
-    const material = new THREE.MeshStandardMaterial({
-      color: 0x4be29f,
-      emissive: 0x0d5e43,
-      roughness: 0.45,
-      metalness: 0.2,
-    });
-
-    const mesh = new THREE.Mesh(geometry, material);
+    const avatar = createRemoteAvatarHandle();
     this.applyRemotePlayerRenderPose(
-      mesh,
+      avatar,
       renderState.renderPosition,
       renderState.renderYaw,
       renderState.renderPitch,
     );
-    this.scene.add(mesh);
-    this.remotePlayerMeshes.set(playerId, mesh);
+    this.scene.add(avatar.object3d);
+    this.remotePlayerAvatars.set(playerId, avatar);
   }
 
   private removeRemotePlayerMesh(playerId: string): void {
-    const mesh = this.remotePlayerMeshes.get(playerId);
-    if (!mesh) {
+    const avatar = this.remotePlayerAvatars.get(playerId);
+    if (!avatar) {
       return;
     }
 
-    this.scene.remove(mesh);
-    mesh.geometry.dispose();
-    if (Array.isArray(mesh.material)) {
-      for (const material of mesh.material) {
-        material.dispose();
-      }
-    } else {
-      mesh.material.dispose();
-    }
-    this.remotePlayerMeshes.delete(playerId);
+    this.scene.remove(avatar.object3d);
+    avatar.dispose();
+    this.remotePlayerAvatars.delete(playerId);
   }
 
   private clearRemotePlayers(): void {
-    for (const playerId of [...this.remotePlayerMeshes.keys()]) {
+    for (const playerId of [...this.remotePlayerAvatars.keys()]) {
       this.removeRemotePlayerMesh(playerId);
     }
     this.remotePlayerRenderStates.clear();

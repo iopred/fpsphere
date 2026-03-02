@@ -4,8 +4,10 @@
 
 - [x] M0: Foundations
 - [x] M1: Local Playable Sphere
-- [ ] M2: Multiplayer Slice
-- [ ] M3: Scale and Dimensional Features
+- [x] M2: Multiplayer Slice
+- [ ] M3: Avatar Presence
+- [ ] M4: Temporal Queries and Animation Feedback
+- [ ] M5: AOI and Delta Networking
 - [x] C1: Rendering app shell
 - [x] C2: FPS controller
 - [x] C3: Sphere physics integration
@@ -112,24 +114,30 @@ Exit criteria:
 - [x] Shortcut behavior is validated for both QWERTY and Dvorak keyboard layouts.
 - [x] Scene is sourced from datastore model (not hardcoded mesh-only).
 
-## [ ] M2: Multiplayer Slice (3-5 weeks)
-- Authoritative Rust simulation loop for basic movement state.
-- Client prediction/reconciliation prototype.
-- Snapshot/state sync for sphere entities.
-
-Current implementation status:
-- [x] WebSocket multiplayer transport with per-world filtering.
-- [x] Remote player state snapshots (position + orientation) to connected clients.
-- [x] World commit broadcasts and client-side world hydration sync.
-- [ ] Authoritative simulation loop and reconciliation remain to be implemented.
+## [x] M2: Multiplayer Slice (3-5 weeks)
+- Authoritative Rust simulation loop for multiplayer movement state.
+- Client prediction/reconciliation.
+- Snapshot/state sync for player movement and world commits.
+- Remote interpolation/smoothing with orientation wired for mesh-ready avatars.
 
 Exit criteria:
-- Two clients can connect and observe synchronized movement in same sphere space.
+- [x] Two clients can connect and observe synchronized movement in same sphere space.
+- [x] Sprint 2 closeout evidence recorded in [docs/sprint-2-closeout.md](docs/sprint-2-closeout.md).
 
-## [ ] M3: Scale and Dimensional Features (ongoing)
-- Interest management and partitioning.
-- More dimensions and overlay channels.
-- Performance tuning and observability.
+## [ ] M3: Avatar Presence (next sprint)
+- Replace sphere-only remote player rendering with an avatar pipeline.
+- Keep avatar pose update boundary independent from avatar mesh implementation.
+- Support both desktop FPS and AR remote avatar rendering through the same adapter.
+
+## [ ] M4: Temporal Queries and Animation Feedback
+- Activate `time_window` in query/runtime filtering.
+- Add timeline-driven animation hooks and deterministic temporal sampling.
+- Add template-placement creation playback animation for editor feedback.
+
+## [ ] M5: AOI and Delta Networking
+- Add area-of-interest filtering for player and world updates.
+- Add delta snapshot transport with full-snapshot fallback.
+- Reduce irrelevant update traffic (for example, template editing should not stream unrelated world updates).
 
 ## 5. Multi-Agent Workstreams
 
@@ -433,3 +441,39 @@ Manual acceptance:
 - Remote players are interpolated/smoothed from authoritative snapshots.
 - Protocol and tests are updated to prevent drift/regression.
 - Demo and evidence are recorded in a Sprint 2 closeout artifact.
+
+## 13. Simplified Forward Roadmap (Active)
+
+This section is the active execution plan. Sections above are retained as delivery history.
+
+### 13.1 Sprint 3 Plan (M3 Avatar Presence)
+
+Sprint window: 2026-03-02 to 2026-03-13  
+Goal: ship a mesh-ready avatar pipeline for multiplayer players.
+
+- [x] `S3-A1` Create a shared avatar render adapter used by FPS and AR clients.
+- [x] `S3-A2` Replace direct remote-player sphere mesh lifecycle with avatar instances.
+- [x] `S3-A3` Render a default orientation-readable avatar mesh (not sphere-only).
+- [ ] `S3-A4` Add avatar style/config hooks (materials/colors/scale) keyed by player id.
+- [ ] `S3-A5` Add regression checks for avatar lifecycle (spawn/update/remove/world-switch).
+
+### 13.2 Sprint 4 Plan (M4 Temporal Queries + Animation Feedback)
+
+Sprint window: 2026-03-16 to 2026-03-27  
+Goal: use `time_window` for deterministic temporal querying and editor feedback animation.
+
+- [ ] `S4-T1` Define temporal query contract (`tick`, window filtering semantics).
+- [ ] `S4-T2` Implement runtime/store filtering by `time_window`.
+- [ ] `S4-T3` Add template-placement creation playback animation driven by `time_window`.
+- [ ] `S4-T4` Add temporal regression tests for deterministic query/playback behavior.
+
+### 13.3 Sprint 5 Plan (M5 AOI + Delta Networking)
+
+Sprint window: 2026-03-30 to 2026-04-10  
+Goal: reduce bandwidth/latency by interest-managed and delta-encoded updates.
+
+- [ ] `S5-N1` Define AOI partition/query policy for players and world entities.
+- [ ] `S5-N2` Filter outbound updates by AOI membership.
+- [ ] `S5-N3` Add delta snapshot protocol with baseline tracking and fallback full snapshots.
+- [ ] `S5-N4` Ensure template-focused editing suppresses unrelated large-world update streams.
+- [ ] `S5-N5` Add bandwidth/latency acceptance checks for AOI + delta mode.
