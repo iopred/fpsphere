@@ -10,18 +10,22 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use aoi::AoiPolicy;
 use multiplayer::{
-    filter_snapshot_players_for_observer, ClientMultiplayerMessage, MultiplayerHub,
-    PlayerInputEnqueueResult, ServerMultiplayerMessage,
+    build_snapshot_delta, filter_snapshot_players_for_observer, snapshot_players_by_id,
+    ClientMultiplayerMessage, MultiplayerHub, MultiplayerPlayerSnapshot, PlayerInputEnqueueResult,
+    ServerMultiplayerMessage,
 };
 use protocol::{
     example_world_snapshot, CommitFailure, CommitRequest, CommitResponse, CommitTarget,
     TemporalWorldQuery, WorldMutationFailure, WorldRepository, WorldSnapshot,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::RwLock;
+
+const SNAPSHOT_DELTA_REBASE_INTERVAL: u32 = 90;
 
 #[derive(Clone)]
 struct AppState {
@@ -75,6 +79,12 @@ struct WorldMutationResponse {
 struct WorldMutationErrorResponse {
     status: &'static str,
     message: String,
+}
+
+struct SessionSnapshotBaseline {
+    server_tick: u64,
+    players_by_id: HashMap<String, MultiplayerPlayerSnapshot>,
+    delta_frames_since_full: u32,
 }
 
 #[tokio::main]
@@ -325,6 +335,7 @@ async fn handle_ws_connection(
 ) {
     let mut rx = state.multiplayer.subscribe();
     let mut session_user_id = user_id;
+    let mut snapshot_baseline: Option<SessionSnapshotBaseline> = None;
     let player = state
         .multiplayer
         .add_player(session_user_id.clone(), world_id.clone())
@@ -386,14 +397,58 @@ async fn handle_ws_connection(
                                 player.player_id.as_str(),
                                 AoiPolicy::default(),
                             );
-                            let snapshot = ServerMultiplayerMessage::StateSnapshot {
-                                world_id: snapshot_world_id,
+                            let next_players_by_id = snapshot_players_by_id(&filtered_players);
+                            let should_force_full = snapshot_baseline
+                                .as_ref()
+                                .map_or(true, |baseline| {
+                                    baseline.delta_frames_since_full >= SNAPSHOT_DELTA_REBASE_INTERVAL
+                                        || server_tick <= baseline.server_tick
+                                });
+
+                            if should_force_full {
+                                let snapshot = ServerMultiplayerMessage::StateSnapshot {
+                                    world_id: snapshot_world_id,
+                                    server_tick,
+                                    players: filtered_players,
+                                };
+                                if send_ws_message(&mut socket, &snapshot).await.is_err() {
+                                    break;
+                                }
+
+                                snapshot_baseline = Some(SessionSnapshotBaseline {
+                                    server_tick,
+                                    players_by_id: next_players_by_id,
+                                    delta_frames_since_full: 0,
+                                });
+                                continue;
+                            }
+
+                            let baseline = snapshot_baseline
+                                .as_ref()
+                                .expect("baseline should be present when not forcing full");
+                            let delta = build_snapshot_delta(
+                                snapshot_world_id.as_str(),
                                 server_tick,
-                                players: filtered_players,
+                                &filtered_players,
+                                baseline.server_tick,
+                                &baseline.players_by_id,
+                            );
+                            let delta_message = ServerMultiplayerMessage::StateSnapshotDelta {
+                                world_id: delta.world_id,
+                                server_tick: delta.server_tick,
+                                baseline_server_tick: delta.baseline_server_tick,
+                                upsert_players: delta.upsert_players,
+                                removed_player_ids: delta.removed_player_ids,
                             };
-                            if send_ws_message(&mut socket, &snapshot).await.is_err() {
+                            if send_ws_message(&mut socket, &delta_message).await.is_err() {
                                 break;
                             }
+
+                            snapshot_baseline = Some(SessionSnapshotBaseline {
+                                server_tick,
+                                players_by_id: next_players_by_id,
+                                delta_frames_since_full: baseline.delta_frames_since_full.saturating_add(1),
+                            });
                         }
                     }
                     Ok(ServerMultiplayerMessage::WorldCommitApplied { world_id: commit_world_id, commit_id, saved_to, user_id: target_user_id, world }) => {

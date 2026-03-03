@@ -475,6 +475,6 @@ Goal: reduce bandwidth/latency by interest-managed and delta-encoded updates.
 
 - [x] `S5-N1` Define AOI partition/query policy for players and world entities.
 - [x] `S5-N2` Filter outbound updates by AOI membership.
-- [ ] `S5-N3` Add delta snapshot protocol with baseline tracking and fallback full snapshots.
+- [x] `S5-N3` Add delta snapshot protocol with baseline tracking and fallback full snapshots.
 - [ ] `S5-N4` Ensure template-focused editing suppresses unrelated large-world update streams.
 - [ ] `S5-N5` Add bandwidth/latency acceptance checks for AOI + delta mode.

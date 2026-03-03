@@ -130,6 +130,9 @@ Current implementation includes:
   - AOI multiplayer filtering:
     - websocket state snapshots are now filtered per observer by AOI membership instead of full-world player fanout.
     - observer inclusion is guaranteed; tie-break ordering remains deterministic.
+  - Delta multiplayer snapshots:
+    - server tracks per-connection snapshot baselines and emits `state_snapshot_delta` messages between periodic full snapshots.
+    - client reconstructs authoritative full snapshots from deltas, with automatic fallback to next full baseline on mismatch.
   - Backend delete semantics now reject deleting non-leaf spheres (prevents orphaned parent references).
   - Sprint 1 closeout artifact with acceptance evidence: [docs/sprint-1-closeout.md](docs/sprint-1-closeout.md).
   - Sprint 2 closeout artifact with authoritative movement acceptance evidence: [docs/sprint-2-closeout.md](docs/sprint-2-closeout.md).

@@ -194,6 +194,26 @@ Server -> client:
   ]
 }
 ```
+- `state_snapshot_delta`:
+```json
+{
+  "type": "state_snapshot_delta",
+  "world_id": "world-main",
+  "server_tick": 100,
+  "baseline_server_tick": 99,
+  "upsert_players": [
+    {
+      "player_id": "player-2",
+      "position_3d": [3.4, 1.0, 8.3],
+      "yaw": 0.1,
+      "pitch": 0.0,
+      "avatar_id": "human",
+      "last_processed_input_tick": 18
+    }
+  ],
+  "removed_player_ids": ["player-8"]
+}
+```
 - `world_commit_applied`:
 ```json
 {
@@ -211,6 +231,8 @@ Server -> client:
 ```
 
 Delivery semantics:
+- `state_snapshot` is sent as the baseline frame and periodically re-sent as fallback/rebase.
+- `state_snapshot_delta` is sent between baseline frames and applies against `baseline_server_tick`.
 - `saved_to = master`: delivered to all clients connected to the same `world_id`.
 - `saved_to = user`: delivered only to connections for that same `user_id` and `world_id`.
 

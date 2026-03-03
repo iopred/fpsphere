@@ -15,6 +15,14 @@ export interface MultiplayerSnapshot {
   players: RemotePlayerState[];
 }
 
+export interface MultiplayerSnapshotDelta {
+  world_id: string;
+  server_tick: number;
+  baseline_server_tick: number;
+  upsert_players: RemotePlayerState[];
+  removed_player_ids: string[];
+}
+
 interface WelcomeMessage {
   type: "welcome";
   player_id: string;
@@ -24,6 +32,10 @@ interface WelcomeMessage {
 
 interface StateSnapshotMessage extends MultiplayerSnapshot {
   type: "state_snapshot";
+}
+
+interface StateSnapshotDeltaMessage extends MultiplayerSnapshotDelta {
+  type: "state_snapshot_delta";
 }
 
 export interface MultiplayerWorldCommit {
@@ -50,6 +62,7 @@ interface PongMessage {
 type ServerMessage =
   | WelcomeMessage
   | StateSnapshotMessage
+  | StateSnapshotDeltaMessage
   | WorldCommitAppliedMessage
   | ErrorMessage
   | PongMessage;
@@ -91,17 +104,55 @@ export interface ConnectMultiplayerParams {
   callbacks: MultiplayerClientCallbacks;
 }
 
+export function applyMultiplayerSnapshotDelta(
+  baseline: MultiplayerSnapshot | null,
+  delta: MultiplayerSnapshotDelta,
+): MultiplayerSnapshot | null {
+  if (!baseline) {
+    return null;
+  }
+  if (baseline.world_id !== delta.world_id) {
+    return null;
+  }
+  if (baseline.server_tick !== delta.baseline_server_tick) {
+    return null;
+  }
+
+  const playersById = new Map<string, RemotePlayerState>();
+  for (const player of baseline.players) {
+    playersById.set(player.player_id, player);
+  }
+
+  for (const playerId of delta.removed_player_ids) {
+    playersById.delete(playerId);
+  }
+  for (const player of delta.upsert_players) {
+    playersById.set(player.player_id, player);
+  }
+
+  const players = [...playersById.values()].sort((left, right) =>
+    left.player_id.localeCompare(right.player_id),
+  );
+  return {
+    world_id: delta.world_id,
+    server_tick: delta.server_tick,
+    players,
+  };
+}
+
 export class MultiplayerClient {
   private socket: WebSocket | null = null;
   private callbacks: MultiplayerClientCallbacks | null = null;
   private worldId = "";
   private userId = "";
+  private lastSnapshotBaseline: MultiplayerSnapshot | null = null;
 
   connect(params: ConnectMultiplayerParams): void {
     this.disconnect();
     this.callbacks = params.callbacks;
     this.worldId = params.worldId;
     this.userId = params.userId;
+    this.lastSnapshotBaseline = null;
 
     const scheme = window.location.protocol === "https:" ? "wss" : "ws";
     const url = `${scheme}://${window.location.host}/ws?user_id=${encodeURIComponent(params.userId)}&world_id=${encodeURIComponent(params.worldId)}`;
@@ -147,7 +198,21 @@ export class MultiplayerClient {
       }
 
       if (parsed.type === "state_snapshot") {
+        this.lastSnapshotBaseline = parsed;
         this.callbacks?.onSnapshot(parsed);
+        return;
+      }
+
+      if (parsed.type === "state_snapshot_delta") {
+        const merged = applyMultiplayerSnapshotDelta(this.lastSnapshotBaseline, parsed);
+        if (!merged) {
+          this.lastSnapshotBaseline = null;
+          this.callbacks?.onError("snapshot delta dropped: missing or mismatched baseline");
+          return;
+        }
+
+        this.lastSnapshotBaseline = merged;
+        this.callbacks?.onSnapshot(merged);
         return;
       }
 
@@ -176,6 +241,7 @@ export class MultiplayerClient {
 
       this.callbacks?.onStatus("disconnected");
       this.socket = null;
+      this.lastSnapshotBaseline = null;
     };
   }
 
@@ -184,6 +250,7 @@ export class MultiplayerClient {
       this.socket.close();
       this.socket = null;
     }
+    this.lastSnapshotBaseline = null;
   }
 
   sendPlayerUpdate(

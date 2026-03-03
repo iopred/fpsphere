@@ -60,6 +60,78 @@ pub struct MultiplayerPlayerSnapshot {
     pub last_processed_input_tick: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiplayerSnapshotDelta {
+    pub world_id: String,
+    pub server_tick: u64,
+    pub baseline_server_tick: u64,
+    pub upsert_players: Vec<MultiplayerPlayerSnapshot>,
+    pub removed_player_ids: Vec<String>,
+}
+
+fn snapshots_match(
+    left: &MultiplayerPlayerSnapshot,
+    right: &MultiplayerPlayerSnapshot,
+) -> bool {
+    left.player_id == right.player_id
+        && left.position_3d[0].to_bits() == right.position_3d[0].to_bits()
+        && left.position_3d[1].to_bits() == right.position_3d[1].to_bits()
+        && left.position_3d[2].to_bits() == right.position_3d[2].to_bits()
+        && left.yaw.to_bits() == right.yaw.to_bits()
+        && left.pitch.to_bits() == right.pitch.to_bits()
+        && left.avatar_id == right.avatar_id
+        && left.last_processed_input_tick == right.last_processed_input_tick
+}
+
+pub fn snapshot_players_by_id(
+    players: &[MultiplayerPlayerSnapshot],
+) -> HashMap<String, MultiplayerPlayerSnapshot> {
+    let mut players_by_id = HashMap::with_capacity(players.len());
+    for player in players {
+        players_by_id.insert(player.player_id.clone(), player.clone());
+    }
+    players_by_id
+}
+
+pub fn build_snapshot_delta(
+    world_id: &str,
+    server_tick: u64,
+    players: &[MultiplayerPlayerSnapshot],
+    baseline_server_tick: u64,
+    baseline_players_by_id: &HashMap<String, MultiplayerPlayerSnapshot>,
+) -> MultiplayerSnapshotDelta {
+    let mut next_players_by_id = HashMap::with_capacity(players.len());
+    for player in players {
+        next_players_by_id.insert(player.player_id.clone(), player);
+    }
+
+    let mut upsert_players = players
+        .iter()
+        .filter(|player| {
+            baseline_players_by_id
+                .get(player.player_id.as_str())
+                .map_or(true, |previous| !snapshots_match(previous, player))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    upsert_players.sort_by(|a, b| a.player_id.cmp(&b.player_id));
+
+    let mut removed_player_ids = baseline_players_by_id
+        .keys()
+        .filter(|player_id| !next_players_by_id.contains_key(*player_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    removed_player_ids.sort();
+
+    MultiplayerSnapshotDelta {
+        world_id: world_id.to_string(),
+        server_tick,
+        baseline_server_tick,
+        upsert_players,
+        removed_player_ids,
+    }
+}
+
 pub fn filter_snapshot_players_for_observer(
     players: &[MultiplayerPlayerSnapshot],
     observer_player_id: &str,
@@ -130,6 +202,13 @@ pub enum ServerMultiplayerMessage {
         world_id: String,
         server_tick: u64,
         players: Vec<MultiplayerPlayerSnapshot>,
+    },
+    StateSnapshotDelta {
+        world_id: String,
+        server_tick: u64,
+        baseline_server_tick: u64,
+        upsert_players: Vec<MultiplayerPlayerSnapshot>,
+        removed_player_ids: Vec<String>,
     },
     WorldCommitApplied {
         world_id: String,
@@ -521,8 +600,8 @@ impl MultiplayerHub {
 #[cfg(test)]
 mod tests {
     use super::{
-        filter_snapshot_players_for_observer, MultiplayerHub, MultiplayerPlayerSnapshot,
-        PlayerInputEnqueueResult, ServerMultiplayerMessage,
+        build_snapshot_delta, filter_snapshot_players_for_observer, snapshot_players_by_id,
+        MultiplayerHub, MultiplayerPlayerSnapshot, PlayerInputEnqueueResult, ServerMultiplayerMessage,
     };
     use crate::aoi::AoiPolicy;
     use crate::protocol::{example_world_snapshot, CommitTarget};
@@ -1200,5 +1279,85 @@ mod tests {
         let missing =
             filter_snapshot_players_for_observer(&players, "missing-player", AoiPolicy::default());
         assert_eq!(missing.len(), players.len());
+    }
+
+    #[test]
+    fn build_snapshot_delta_tracks_upserts_and_removals_against_baseline() {
+        let baseline_players = vec![
+            MultiplayerPlayerSnapshot {
+                player_id: "player-a".to_string(),
+                position_3d: [0.0, 0.0, 0.0],
+                yaw: 0.0,
+                pitch: 0.0,
+                avatar_id: "duck".to_string(),
+                last_processed_input_tick: 1,
+            },
+            MultiplayerPlayerSnapshot {
+                player_id: "player-b".to_string(),
+                position_3d: [10.0, 0.0, 0.0],
+                yaw: 0.0,
+                pitch: 0.0,
+                avatar_id: "duck".to_string(),
+                last_processed_input_tick: 1,
+            },
+        ];
+        let next_players = vec![
+            MultiplayerPlayerSnapshot {
+                player_id: "player-a".to_string(),
+                position_3d: [1.0, 0.0, 0.0],
+                yaw: 0.1,
+                pitch: 0.0,
+                avatar_id: "human".to_string(),
+                last_processed_input_tick: 2,
+            },
+            MultiplayerPlayerSnapshot {
+                player_id: "player-c".to_string(),
+                position_3d: [4.0, 0.0, 0.0],
+                yaw: 0.0,
+                pitch: 0.0,
+                avatar_id: "duck".to_string(),
+                last_processed_input_tick: 1,
+            },
+        ];
+        let baseline_by_id = snapshot_players_by_id(&baseline_players);
+        let delta = build_snapshot_delta("world-main", 22, &next_players, 21, &baseline_by_id);
+
+        assert_eq!(delta.world_id, "world-main");
+        assert_eq!(delta.server_tick, 22);
+        assert_eq!(delta.baseline_server_tick, 21);
+        assert_eq!(
+            delta.removed_player_ids,
+            vec!["player-b".to_string()]
+        );
+        assert_eq!(delta.upsert_players.len(), 2);
+        assert_eq!(delta.upsert_players[0].player_id, "player-a");
+        assert_eq!(delta.upsert_players[1].player_id, "player-c");
+    }
+
+    #[test]
+    fn build_snapshot_delta_is_empty_when_state_matches_baseline() {
+        let players = vec![
+            MultiplayerPlayerSnapshot {
+                player_id: "player-a".to_string(),
+                position_3d: [0.0, 0.0, 0.0],
+                yaw: 0.0,
+                pitch: 0.0,
+                avatar_id: "duck".to_string(),
+                last_processed_input_tick: 1,
+            },
+            MultiplayerPlayerSnapshot {
+                player_id: "player-b".to_string(),
+                position_3d: [1.0, 0.0, 0.0],
+                yaw: 0.0,
+                pitch: 0.0,
+                avatar_id: "human".to_string(),
+                last_processed_input_tick: 3,
+            },
+        ];
+        let baseline_by_id = snapshot_players_by_id(&players);
+        let delta = build_snapshot_delta("world-main", 10, &players, 9, &baseline_by_id);
+
+        assert!(delta.upsert_players.is_empty());
+        assert!(delta.removed_player_ids.is_empty());
     }
 }
