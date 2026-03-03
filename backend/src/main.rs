@@ -205,11 +205,14 @@ async fn get_world_snapshot(
     let resolved_temporal_query = (!temporal_query.is_empty()).then_some(temporal_query);
 
     let repository = state.repository.read().await;
-    let snapshot = repository.get_world_snapshot_with_query(
-        &world_id,
-        query.user_id.as_deref(),
-        resolved_temporal_query,
-    );
+    let snapshot = match resolved_temporal_query {
+        Some(temporal_query) => repository.get_world_snapshot_with_query(
+            &world_id,
+            query.user_id.as_deref(),
+            Some(temporal_query),
+        ),
+        None => repository.get_world_snapshot(&world_id, query.user_id.as_deref()),
+    };
 
     match snapshot {
         Some(world) => Ok(Json(world)),

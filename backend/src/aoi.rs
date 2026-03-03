@@ -1,6 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AoiDomain {
     Players,
+    #[allow(dead_code)]
     WorldEntities,
 }
 

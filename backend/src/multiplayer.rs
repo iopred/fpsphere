@@ -1,4 +1,6 @@
-use crate::aoi::{select_ids_in_query, AoiDomain, AoiPolicy};
+use crate::aoi::{
+    covering_partition_keys, partition_key, select_ids_in_query, AoiDomain, AoiPolicy,
+};
 use crate::protocol::{CommitTarget, WorldSnapshot};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -150,8 +152,17 @@ pub fn filter_snapshot_players_for_observer(
     };
 
     let query = policy.query_for(AoiDomain::Players, observer.position_3d);
+    let covered_keys = covering_partition_keys(query, policy.partition_cell_edge)
+        .into_iter()
+        .collect::<HashSet<_>>();
+    let candidate_players = players
+        .iter()
+        .filter(|player| {
+            covered_keys.contains(&partition_key(player.position_3d, policy.partition_cell_edge))
+        })
+        .collect::<Vec<_>>();
     let mut included_ids = select_ids_in_query(
-        players.iter(),
+        candidate_players,
         query,
         None,
         |player| player.position_3d,
