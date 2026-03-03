@@ -65,6 +65,8 @@ pub enum ClientMultiplayerMessage {
     Hello {
         user_id: Option<String>,
         world_id: Option<String>,
+        #[serde(default)]
+        avatar_id: Option<String>,
     },
     PlayerUpdate {
         position_3d: [f32; 3],
@@ -126,6 +128,16 @@ impl AuthoritativePlayerStore {
     fn set_player_identity(&mut self, player_id: &str, user_id: String) {
         if let Some(player) = self.get_player_mut(player_id) {
             player.user_id = user_id;
+        }
+    }
+
+    fn set_player_avatar(&mut self, player_id: &str, avatar_id: Option<String>) {
+        let Some(normalized_avatar_id) = normalize_avatar_id_option(avatar_id.as_deref()) else {
+            return;
+        };
+
+        if let Some(player) = self.get_player_mut(player_id) {
+            player.avatar_id = normalized_avatar_id;
         }
     }
 
@@ -405,6 +417,13 @@ impl MultiplayerHub {
             .set_player_identity(player_id, next_user_id);
     }
 
+    pub async fn set_player_avatar(&self, player_id: &str, avatar_id: Option<String>) {
+        self.players
+            .write()
+            .await
+            .set_player_avatar(player_id, avatar_id);
+    }
+
     pub async fn update_player(
         &self,
         player_id: &str,
@@ -654,6 +673,81 @@ mod tests {
         assert!(
             second_result.is_ok(),
             "expected normalized avatar snapshot within timeout"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_player_avatar_applies_without_pose_update() {
+        let hub = MultiplayerHub::new_without_snapshot_loop();
+        let mut rx = hub.subscribe();
+        let player = hub
+            .add_player("user-avatar-hello".to_string(), "world-main".to_string())
+            .await;
+
+        hub.set_player_avatar(&player.player_id, Some("human".to_string()))
+            .await;
+        hub.broadcast_world_snapshot("world-main").await;
+
+        let first_result = timeout(Duration::from_millis(200), async {
+            loop {
+                let received = rx.recv().await.expect("state snapshot message");
+                match received {
+                    ServerMultiplayerMessage::StateSnapshot {
+                        world_id, players, ..
+                    } => {
+                        if world_id != "world-main" {
+                            continue;
+                        }
+
+                        if let Some(player_snapshot) = players
+                            .iter()
+                            .find(|item| item.player_id == player.player_id)
+                        {
+                            assert_eq!(player_snapshot.avatar_id, "human");
+                            return;
+                        }
+                    }
+                    _ => continue,
+                }
+            }
+        })
+        .await;
+        assert!(
+            first_result.is_ok(),
+            "expected hello-time avatar snapshot within timeout"
+        );
+
+        hub.set_player_avatar(&player.player_id, Some("robot".to_string()))
+            .await;
+        hub.broadcast_world_snapshot("world-main").await;
+
+        let second_result = timeout(Duration::from_millis(200), async {
+            loop {
+                let received = rx.recv().await.expect("state snapshot message");
+                match received {
+                    ServerMultiplayerMessage::StateSnapshot {
+                        world_id, players, ..
+                    } => {
+                        if world_id != "world-main" {
+                            continue;
+                        }
+
+                        if let Some(player_snapshot) = players
+                            .iter()
+                            .find(|item| item.player_id == player.player_id)
+                        {
+                            assert_eq!(player_snapshot.avatar_id, "duck");
+                            return;
+                        }
+                    }
+                    _ => continue,
+                }
+            }
+        })
+        .await;
+        assert!(
+            second_result.is_ok(),
+            "expected normalized hello-time avatar snapshot within timeout"
         );
     }
 

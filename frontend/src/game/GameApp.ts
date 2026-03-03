@@ -1685,6 +1685,7 @@ export class GameApp {
     this.multiplayerClient.connect({
       userId: this.userId,
       worldId,
+      avatarId: this.selectedAvatarId,
       callbacks: {
         onStatus: (status) => {
           this.multiplayerStatus = status;
@@ -1696,6 +1697,7 @@ export class GameApp {
         onWelcome: (playerId) => {
           this.localPlayerId = playerId;
           this.multiplayerError = null;
+          this.sendLocalPlayerUpdate({ recordPrediction: false });
         },
         onSnapshot: (snapshot) => {
           this.applyMultiplayerSnapshot(snapshot);

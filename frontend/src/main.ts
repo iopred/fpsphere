@@ -25,6 +25,11 @@ async function createApp(modeValue: string): Promise<StartableApp> {
     return new FpsphereQrPrintApp(appMountNode);
   }
 
+  if (modeValue === "avatar") {
+    const { AvatarEditorApp } = await import("./game/AvatarEditorApp");
+    return new AvatarEditorApp(appMountNode);
+  }
+
   const { GameApp } = await import("./game/GameApp");
   return new GameApp(appMountNode);
 }

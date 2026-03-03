@@ -439,6 +439,7 @@ async fn handle_client_message(
         ClientMultiplayerMessage::Hello {
             user_id,
             world_id: requested_world_id,
+            avatar_id,
         } => {
             if let Some(requested_world) = requested_world_id {
                 if requested_world != world_id {
@@ -460,6 +461,10 @@ async fn handle_client_message(
             state
                 .multiplayer
                 .set_player_identity(player_id, normalized_user_id.clone())
+                .await;
+            state
+                .multiplayer
+                .set_player_avatar(player_id, avatar_id)
                 .await;
             return Ok(normalized_user_id);
         }

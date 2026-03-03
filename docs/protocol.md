@@ -102,8 +102,15 @@
 Client -> server:
 - `hello`:
 ```json
-{ "type": "hello", "user_id": "user-123", "world_id": "world-main" }
+{
+  "type": "hello",
+  "user_id": "user-123",
+  "world_id": "world-main",
+  "avatar_id": "human"
+}
 ```
+  - `avatar_id` is optional; supported values are `duck` and `human`.
+  - When present, the backend applies it immediately for that player session.
 - `player_update`:
 ```json
 {

@@ -67,6 +67,7 @@ interface HelloMessage {
   type: "hello";
   user_id: string;
   world_id: string;
+  avatar_id?: string;
 }
 
 interface PingMessage {
@@ -86,6 +87,7 @@ export interface MultiplayerClientCallbacks {
 export interface ConnectMultiplayerParams {
   userId: string;
   worldId: string;
+  avatarId?: string;
   callbacks: MultiplayerClientCallbacks;
 }
 
@@ -118,6 +120,7 @@ export class MultiplayerClient {
         type: "hello",
         user_id: this.userId,
         world_id: this.worldId,
+        avatar_id: params.avatarId,
       });
     };
 

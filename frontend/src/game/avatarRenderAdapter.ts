@@ -22,11 +22,35 @@ export interface AvatarRenderStyle {
   directionEmissive: number;
 }
 
+export interface DuckAvatarLayout {
+  headYOffset: number;
+  headZOffset: number;
+  beakYOffset: number;
+  beakZOffset: number;
+  beakRotationX: number;
+}
+
+export interface HumanAvatarLayout {
+  torsoYOffset: number;
+  headYOffset: number;
+  armYOffset: number;
+  directionYOffset: number;
+  directionZOffset: number;
+}
+
+export interface AvatarLayoutOverridesById {
+  duck?: Partial<DuckAvatarLayout>;
+  human?: Partial<HumanAvatarLayout>;
+}
+
 interface CreateRemoteAvatarHandleParams {
   avatarId?: string;
   playerId?: string;
   styleOverrides?: Partial<AvatarRenderStyle>;
+  layoutOverrides?: Partial<DuckAvatarLayout> | Partial<HumanAvatarLayout>;
 }
+
+const AVATAR_LAYOUT_STORAGE_KEY = "fpsphere.avatar_layout_overrides.v1";
 
 const BASE_AVATAR_STYLES: Record<AvatarId, AvatarRenderStyle> = {
   duck: {
@@ -53,6 +77,22 @@ const BASE_AVATAR_STYLES: Record<AvatarId, AvatarRenderStyle> = {
   },
 };
 
+const DEFAULT_DUCK_AVATAR_LAYOUT: DuckAvatarLayout = {
+  headYOffset: 0.92,
+  headZOffset: 0.06,
+  beakYOffset: 0.82,
+  beakZOffset: -0.56,
+  beakRotationX: -Math.PI / 2,
+};
+
+const DEFAULT_HUMAN_AVATAR_LAYOUT: HumanAvatarLayout = {
+  torsoYOffset: 0.36,
+  headYOffset: 1.12,
+  armYOffset: 0.45,
+  directionYOffset: 0.6,
+  directionZOffset: -0.52,
+};
+
 export function availableAvatarIds(): AvatarId[] {
   return [...AVATAR_IDS];
 }
@@ -69,6 +109,134 @@ export function normalizeAvatarId(avatarId: string | null | undefined): AvatarId
     return "human";
   }
   return DEFAULT_AVATAR_ID;
+}
+
+export function defaultAvatarLayout(avatarId: AvatarId): DuckAvatarLayout | HumanAvatarLayout {
+  if (avatarId === "human") {
+    return { ...DEFAULT_HUMAN_AVATAR_LAYOUT };
+  }
+  return { ...DEFAULT_DUCK_AVATAR_LAYOUT };
+}
+
+function readFiniteNumber(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return value;
+}
+
+function sanitizeDuckLayout(raw: unknown): Partial<DuckAvatarLayout> | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const record = raw as Record<string, unknown>;
+  const headYOffset = readFiniteNumber(record.headYOffset);
+  const headZOffset = readFiniteNumber(record.headZOffset);
+  const beakYOffset = readFiniteNumber(record.beakYOffset);
+  const beakZOffset = readFiniteNumber(record.beakZOffset);
+  const beakRotationX = readFiniteNumber(record.beakRotationX);
+
+  const partial: Partial<DuckAvatarLayout> = {};
+  if (headYOffset !== null) {
+    partial.headYOffset = headYOffset;
+  }
+  if (headZOffset !== null) {
+    partial.headZOffset = headZOffset;
+  }
+  if (beakYOffset !== null) {
+    partial.beakYOffset = beakYOffset;
+  }
+  if (beakZOffset !== null) {
+    partial.beakZOffset = beakZOffset;
+  }
+  if (beakRotationX !== null) {
+    partial.beakRotationX = beakRotationX;
+  }
+  return partial;
+}
+
+function sanitizeHumanLayout(raw: unknown): Partial<HumanAvatarLayout> | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const record = raw as Record<string, unknown>;
+  const torsoYOffset = readFiniteNumber(record.torsoYOffset);
+  const headYOffset = readFiniteNumber(record.headYOffset);
+  const armYOffset = readFiniteNumber(record.armYOffset);
+  const directionYOffset = readFiniteNumber(record.directionYOffset);
+  const directionZOffset = readFiniteNumber(record.directionZOffset);
+
+  const partial: Partial<HumanAvatarLayout> = {};
+  if (torsoYOffset !== null) {
+    partial.torsoYOffset = torsoYOffset;
+  }
+  if (headYOffset !== null) {
+    partial.headYOffset = headYOffset;
+  }
+  if (armYOffset !== null) {
+    partial.armYOffset = armYOffset;
+  }
+  if (directionYOffset !== null) {
+    partial.directionYOffset = directionYOffset;
+  }
+  if (directionZOffset !== null) {
+    partial.directionZOffset = directionZOffset;
+  }
+  return partial;
+}
+
+export function loadAvatarLayoutOverrides(): AvatarLayoutOverridesById {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(AVATAR_LAYOUT_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const duck = sanitizeDuckLayout(parsed.duck);
+    const human = sanitizeHumanLayout(parsed.human);
+    return {
+      ...(duck ? { duck } : {}),
+      ...(human ? { human } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
+export function saveAvatarLayoutOverrides(overrides: AvatarLayoutOverridesById): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      AVATAR_LAYOUT_STORAGE_KEY,
+      JSON.stringify(overrides),
+    );
+  } catch {
+    // Ignore localStorage write failures.
+  }
+}
+
+function resolveDuckLayout(overrides: Partial<DuckAvatarLayout> = {}): DuckAvatarLayout {
+  return {
+    ...DEFAULT_DUCK_AVATAR_LAYOUT,
+    ...overrides,
+  };
+}
+
+function resolveHumanLayout(overrides: Partial<HumanAvatarLayout> = {}): HumanAvatarLayout {
+  return {
+    ...DEFAULT_HUMAN_AVATAR_LAYOUT,
+    ...overrides,
+  };
 }
 
 function hashPlayerId(playerId: string): number {
@@ -111,7 +279,10 @@ function resolveAvatarStyle(
   };
 }
 
-function createDuckAvatarMeshes(style: AvatarRenderStyle): {
+function createDuckAvatarMeshes(
+  style: AvatarRenderStyle,
+  layout: DuckAvatarLayout,
+): {
   root: THREE.Group;
   geometries: THREE.BufferGeometry[];
   materials: THREE.Material[];
@@ -137,7 +308,11 @@ function createDuckAvatarMeshes(style: AvatarRenderStyle): {
     metalness: 0.1,
   });
   const headMesh = new THREE.Mesh(headGeometry, headMaterial);
-  headMesh.position.set(0, style.radius * 0.92, style.radius * 0.06);
+  headMesh.position.set(
+    0,
+    style.radius * layout.headYOffset,
+    style.radius * layout.headZOffset,
+  );
   root.add(headMesh);
 
   const beakGeometry = new THREE.ConeGeometry(style.radius * 0.18, style.radius * 0.38, 12);
@@ -148,8 +323,12 @@ function createDuckAvatarMeshes(style: AvatarRenderStyle): {
     metalness: 0.08,
   });
   const beakMesh = new THREE.Mesh(beakGeometry, beakMaterial);
-  beakMesh.rotation.x = -Math.PI / 2;
-  beakMesh.position.set(0, style.radius * 0.82, -style.radius * 0.72);
+  beakMesh.rotation.x = layout.beakRotationX;
+  beakMesh.position.set(
+    0,
+    style.radius * layout.beakYOffset,
+    style.radius * layout.beakZOffset,
+  );
   root.add(beakMesh);
 
   return {
@@ -159,7 +338,10 @@ function createDuckAvatarMeshes(style: AvatarRenderStyle): {
   };
 }
 
-function createHumanAvatarMeshes(style: AvatarRenderStyle): {
+function createHumanAvatarMeshes(
+  style: AvatarRenderStyle,
+  layout: HumanAvatarLayout,
+): {
   root: THREE.Group;
   geometries: THREE.BufferGeometry[];
   materials: THREE.Material[];
@@ -180,7 +362,7 @@ function createHumanAvatarMeshes(style: AvatarRenderStyle): {
     metalness: 0.2,
   });
   const torsoMesh = new THREE.Mesh(torsoGeometry, bodyMaterial);
-  torsoMesh.position.set(0, style.radius * 0.36, 0);
+  torsoMesh.position.set(0, style.radius * layout.torsoYOffset, 0);
   root.add(torsoMesh);
 
   const headRadius = style.radius * 0.24;
@@ -192,7 +374,7 @@ function createHumanAvatarMeshes(style: AvatarRenderStyle): {
     metalness: 0.1,
   });
   const headMesh = new THREE.Mesh(headGeometry, headMaterial);
-  headMesh.position.set(0, style.radius * 1.12, 0);
+  headMesh.position.set(0, style.radius * layout.headYOffset, 0);
   root.add(headMesh);
 
   const limbGeometry = new THREE.CapsuleGeometry(
@@ -208,11 +390,11 @@ function createHumanAvatarMeshes(style: AvatarRenderStyle): {
     metalness: 0.16,
   });
   const leftArm = new THREE.Mesh(limbGeometry, limbMaterial);
-  leftArm.position.set(-style.radius * 0.35, style.radius * 0.45, 0);
+  leftArm.position.set(-style.radius * 0.35, style.radius * layout.armYOffset, 0);
   leftArm.rotation.z = Math.PI / 2;
   root.add(leftArm);
   const rightArm = new THREE.Mesh(limbGeometry, limbMaterial);
-  rightArm.position.set(style.radius * 0.35, style.radius * 0.45, 0);
+  rightArm.position.set(style.radius * 0.35, style.radius * layout.armYOffset, 0);
   rightArm.rotation.z = Math.PI / 2;
   root.add(rightArm);
 
@@ -225,7 +407,11 @@ function createHumanAvatarMeshes(style: AvatarRenderStyle): {
   });
   const directionMesh = new THREE.Mesh(directionGeometry, directionMaterial);
   directionMesh.rotation.x = -Math.PI / 2;
-  directionMesh.position.set(0, style.radius * 0.6, -style.radius * 0.52);
+  directionMesh.position.set(
+    0,
+    style.radius * layout.directionYOffset,
+    style.radius * layout.directionZOffset,
+  );
   root.add(directionMesh);
 
   return {
@@ -239,15 +425,27 @@ export function createRemoteAvatarHandle(
   params: CreateRemoteAvatarHandleParams = {},
 ): AvatarRenderHandle {
   const avatarId = normalizeAvatarId(params.avatarId);
+  const storedLayoutOverrides = loadAvatarLayoutOverrides();
   const style = resolveAvatarStyle(
     avatarId,
     params.playerId,
     params.styleOverrides ?? {},
   );
-  const meshSet =
-    avatarId === "human"
-      ? createHumanAvatarMeshes(style)
-      : createDuckAvatarMeshes(style);
+  const meshSet = (() => {
+    if (avatarId === "human") {
+      const layout = resolveHumanLayout({
+        ...(storedLayoutOverrides.human ?? {}),
+        ...((params.layoutOverrides as Partial<HumanAvatarLayout> | undefined) ?? {}),
+      });
+      return createHumanAvatarMeshes(style, layout);
+    }
+
+    const layout = resolveDuckLayout({
+      ...(storedLayoutOverrides.duck ?? {}),
+      ...((params.layoutOverrides as Partial<DuckAvatarLayout> | undefined) ?? {}),
+    });
+    return createDuckAvatarMeshes(style, layout);
+  })();
 
   return {
     object3d: meshSet.root,

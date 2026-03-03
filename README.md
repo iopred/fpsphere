@@ -60,7 +60,11 @@ Current implementation includes:
    - On iOS browsers (Chrome/Safari WebKit), native `BarcodeDetector` may be missing; the app now falls back to a JS `jsQR` decoder loaded at runtime.
 14. Avatar selection in editor mode:
    - In editor mode, use the Template HUD `Avatar` row (`-` / `+`) to choose local multiplayer avatar (`duck` or `human`).
-   - Avatar choice is sent as `avatar_id` in player updates and appears for remote players in both FPS and AR views.
+   - Avatar choice is sent as `avatar_id` in the multiplayer handshake (`hello`) and player updates, and appears for remote players in both FPS and AR views.
+15. Avatar editor mode:
+   - Open `http://localhost:5173/?mode=avatar`.
+   - Adjust avatar layout sliders and preview the mesh live.
+   - Layout overrides are stored in localStorage and reused by FPS + AR remote avatar rendering.
 
 ### Backend
 
@@ -101,6 +105,7 @@ Current implementation includes:
   - Shared avatar render adapter now used by both FPS and AR remote-player paths.
   - Default remote avatar now uses orientation-readable mesh parts (body + head + direction marker).
   - Editor HUD now includes local avatar selection (`duck` / `human`) and publishes `avatar_id` in multiplayer updates.
+  - New Avatar Editor app mode (`?mode=avatar`) supports live layout tuning and persisted per-avatar overrides.
 - Additional shipped features:
   - Level management (list/create/delete/switch worlds from editor HUD).
   - Template-driven subworld instancing (`world_template`, `world_scale`) with shared template roots.
