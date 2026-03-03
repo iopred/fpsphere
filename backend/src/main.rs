@@ -468,10 +468,11 @@ async fn handle_client_message(
             yaw,
             pitch,
             client_tick,
+            avatar_id,
         } => {
             let update_result = state
                 .multiplayer
-                .update_player(player_id, position_3d, yaw, pitch, client_tick)
+                .update_player(player_id, position_3d, yaw, pitch, client_tick, avatar_id)
                 .await;
 
             if matches!(update_result, PlayerInputEnqueueResult::PlayerMissing) {

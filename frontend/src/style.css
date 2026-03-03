@@ -32,10 +32,17 @@ body,
   pointer-events: none;
 }
 
-.template-hud {
+.editor-panels {
   position: absolute;
   top: 12px;
   right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.template-hud {
   min-width: 210px;
   padding: 10px 12px;
   border-radius: 8px;
@@ -121,9 +128,6 @@ body,
 }
 
 .level-select {
-  position: absolute;
-  top: 154px;
-  right: 12px;
   min-width: 210px;
   max-width: 300px;
   padding: 10px 12px;

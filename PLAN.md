@@ -454,7 +454,7 @@ Goal: ship a mesh-ready avatar pipeline for multiplayer players.
 - [x] `S3-A1` Create a shared avatar render adapter used by FPS and AR clients.
 - [x] `S3-A2` Replace direct remote-player sphere mesh lifecycle with avatar instances.
 - [x] `S3-A3` Render a default orientation-readable avatar mesh (not sphere-only).
-- [ ] `S3-A4` Add avatar style/config hooks (materials/colors/scale) keyed by player id.
+- [x] `S3-A4` Add avatar style/config hooks (materials/colors/scale) keyed by player id.
 - [ ] `S3-A5` Add regression checks for avatar lifecycle (spawn/update/remove/world-switch).
 
 ### 13.2 Sprint 4 Plan (M4 Temporal Queries + Animation Feedback)

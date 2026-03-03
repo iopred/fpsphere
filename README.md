@@ -58,6 +58,9 @@ Current implementation includes:
    - AR mode now renders the same world snapshot/model pipeline as FPS mode and also displays live remote multiplayer players.
    - For phone camera access, run on a secure origin (`https://`) or localhost-equivalent.
    - On iOS browsers (Chrome/Safari WebKit), native `BarcodeDetector` may be missing; the app now falls back to a JS `jsQR` decoder loaded at runtime.
+14. Avatar selection in editor mode:
+   - In editor mode, use the Template HUD `Avatar` row (`-` / `+`) to choose local multiplayer avatar (`duck` or `human`).
+   - Avatar choice is sent as `avatar_id` in player updates and appears for remote players in both FPS and AR views.
 
 ### Backend
 
@@ -97,6 +100,7 @@ Current implementation includes:
 - M3 avatar presence: in progress.
   - Shared avatar render adapter now used by both FPS and AR remote-player paths.
   - Default remote avatar now uses orientation-readable mesh parts (body + head + direction marker).
+  - Editor HUD now includes local avatar selection (`duck` / `human`) and publishes `avatar_id` in multiplayer updates.
 - Additional shipped features:
   - Level management (list/create/delete/switch worlds from editor HUD).
   - Template-driven subworld instancing (`world_template`, `world_scale`) with shared template roots.
@@ -104,7 +108,7 @@ Current implementation includes:
   - QR marker print mode and mobile AR marker viewer mode.
   - Simplified payloads:
     - commit success responses now include `commit_id`, `saved_to`, `reason`, and `world`.
-    - multiplayer state snapshots include `world_id`, `server_tick`, and per-player `player_id`, `position_3d`, `yaw`, `pitch`, `last_processed_input_tick`.
+    - multiplayer state snapshots include `world_id`, `server_tick`, and per-player `player_id`, `position_3d`, `yaw`, `pitch`, `avatar_id`, `last_processed_input_tick`.
   - Backend delete semantics now reject deleting non-leaf spheres (prevents orphaned parent references).
   - Sprint 1 closeout artifact with acceptance evidence: [docs/sprint-1-closeout.md](docs/sprint-1-closeout.md).
   - Sprint 2 closeout artifact with authoritative movement acceptance evidence: [docs/sprint-2-closeout.md](docs/sprint-2-closeout.md).

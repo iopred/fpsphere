@@ -111,10 +111,12 @@ Client -> server:
   "position_3d": [1.0, 2.0, 3.0],
   "yaw": 0.2,
   "pitch": -0.1,
-  "client_tick": 42
+  "client_tick": 42,
+  "avatar_id": "duck"
 }
 ```
   - `client_tick` is the client's monotonically increasing input sequence.
+  - `avatar_id` is optional; supported values are `duck` and `human`.
 
 Server -> client:
 - `welcome`:
@@ -138,6 +140,7 @@ Server -> client:
       "position_3d": [3.0, 1.0, 8.0],
       "yaw": 0.0,
       "pitch": 0.0,
+      "avatar_id": "human",
       "last_processed_input_tick": 17
     }
   ]

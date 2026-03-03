@@ -38,7 +38,12 @@ import {
 } from "./multiplayerClient";
 import { LocalWorldStore, type WorldStoreSnapshot } from "./worldStore";
 import {
+  availableAvatarIds,
+  avatarLabel,
   createRemoteAvatarHandle,
+  DEFAULT_AVATAR_ID,
+  normalizeAvatarId,
+  type AvatarId,
   type AvatarRenderHandle,
 } from "./avatarRenderAdapter";
 
@@ -89,7 +94,13 @@ interface RemotePlayerRenderState {
   targetYaw: number;
   renderPitch: number;
   targetPitch: number;
+  avatarId: AvatarId;
   lastServerTick: number;
+}
+
+interface RemoteAvatarRenderInstance {
+  avatarId: AvatarId;
+  handle: AvatarRenderHandle;
 }
 
 const tempForward = new THREE.Vector3();
@@ -113,6 +124,7 @@ export class GameApp {
   private readonly hudNode: HTMLDivElement;
   private readonly hintNode: HTMLDivElement;
   private readonly crosshairNode: HTMLDivElement;
+  private readonly editorPanelsNode: HTMLDivElement;
   private readonly templateHudNode: HTMLDivElement;
   private readonly createTemplateValueNode: HTMLSpanElement;
   private readonly selectedTemplateValueNode: HTMLSpanElement;
@@ -120,6 +132,9 @@ export class GameApp {
   private readonly createTemplateIncreaseButton: HTMLButtonElement;
   private readonly selectedTemplateDecreaseButton: HTMLButtonElement;
   private readonly selectedTemplateIncreaseButton: HTMLButtonElement;
+  private readonly avatarDecreaseButton: HTMLButtonElement;
+  private readonly avatarIncreaseButton: HTMLButtonElement;
+  private readonly avatarValueNode: HTMLSpanElement;
   private readonly selectedColorRowNode: HTMLDivElement;
   private readonly selectedColorInputNode: HTMLInputElement;
   private readonly levelSelectNode: HTMLDivElement;
@@ -153,7 +168,8 @@ export class GameApp {
   private readonly obstacleBodiesById = new Map<string, ObstacleBody>();
   private readonly multiplayerClient = new MultiplayerClient();
   private readonly remotePlayerRenderStates = new Map<string, RemotePlayerRenderState>();
-  private readonly remotePlayerAvatars = new Map<string, AvatarRenderHandle>();
+  private readonly remotePlayerAvatars = new Map<string, RemoteAvatarRenderInstance>();
+  private readonly avatarIdChoices = availableAvatarIds();
   private readonly templateIdChoices = [
     TEMPLATE_NONE_ID,
     ...getAvailableSubworldTemplateIds(),
@@ -184,6 +200,7 @@ export class GameApp {
   private localPlayerId: string | null = null;
   private multiplayerStatus = "disconnected";
   private multiplayerError: string | null = null;
+  private selectedAvatarId: AvatarId = DEFAULT_AVATAR_ID;
   private lastNetworkSendTick = 0;
   private nextInputSequence = 0;
   private readonly pendingPredictedInputs = new Map<number, PredictedInputState>();
@@ -210,6 +227,10 @@ export class GameApp {
     this.crosshairNode = document.createElement("div");
     this.crosshairNode.className = "crosshair";
     this.mountNode.appendChild(this.crosshairNode);
+
+    this.editorPanelsNode = document.createElement("div");
+    this.editorPanelsNode.className = "editor-panels";
+    this.mountNode.appendChild(this.editorPanelsNode);
 
     this.templateHudNode = document.createElement("div");
     this.templateHudNode.className = "template-hud";
@@ -275,6 +296,34 @@ export class GameApp {
     selectedRow.appendChild(this.selectedTemplateIncreaseButton);
     this.templateHudNode.appendChild(selectedRow);
 
+    const avatarRow = document.createElement("div");
+    avatarRow.className = "template-hud-row";
+    const avatarLabelNode = document.createElement("span");
+    avatarLabelNode.className = "template-hud-label";
+    avatarLabelNode.textContent = "Avatar";
+    avatarRow.appendChild(avatarLabelNode);
+
+    this.avatarDecreaseButton = document.createElement("button");
+    this.avatarDecreaseButton.type = "button";
+    this.avatarDecreaseButton.textContent = "-";
+    this.avatarDecreaseButton.addEventListener("click", () =>
+      this.adjustSelectedAvatarId(-1),
+    );
+    avatarRow.appendChild(this.avatarDecreaseButton);
+
+    this.avatarValueNode = document.createElement("span");
+    this.avatarValueNode.className = "template-hud-value";
+    avatarRow.appendChild(this.avatarValueNode);
+
+    this.avatarIncreaseButton = document.createElement("button");
+    this.avatarIncreaseButton.type = "button";
+    this.avatarIncreaseButton.textContent = "+";
+    this.avatarIncreaseButton.addEventListener("click", () =>
+      this.adjustSelectedAvatarId(1),
+    );
+    avatarRow.appendChild(this.avatarIncreaseButton);
+    this.templateHudNode.appendChild(avatarRow);
+
     this.selectedColorRowNode = document.createElement("div");
     this.selectedColorRowNode.className = "template-hud-color-row";
 
@@ -295,7 +344,7 @@ export class GameApp {
     this.selectedColorRowNode.appendChild(this.selectedColorInputNode);
     this.templateHudNode.appendChild(this.selectedColorRowNode);
 
-    this.mountNode.appendChild(this.templateHudNode);
+    this.editorPanelsNode.appendChild(this.templateHudNode);
 
     this.levelSelectNode = document.createElement("div");
     this.levelSelectNode.className = "level-select";
@@ -365,7 +414,7 @@ export class GameApp {
       void this.refreshAvailableWorldIds({ preserveCurrentWorldId: true });
     });
     this.levelSelectNode.appendChild(this.levelSelectRefreshButton);
-    this.mountNode.appendChild(this.levelSelectNode);
+    this.editorPanelsNode.appendChild(this.levelSelectNode);
 
     const queryWorldId = new URLSearchParams(window.location.search).get("world");
     if (queryWorldId && queryWorldId.trim().length > 0) {
@@ -1350,6 +1399,36 @@ export class GameApp {
     this.updateTemplateHud();
   }
 
+  private stepAvatarId(currentAvatarId: AvatarId, delta: number): AvatarId {
+    if (this.avatarIdChoices.length === 0) {
+      return DEFAULT_AVATAR_ID;
+    }
+
+    const currentIndex = this.avatarIdChoices.indexOf(currentAvatarId);
+    const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+    const nextIndex =
+      (safeIndex + (delta < 0 ? -1 : 1) + this.avatarIdChoices.length) %
+      this.avatarIdChoices.length;
+    return this.avatarIdChoices[nextIndex];
+  }
+
+  private adjustSelectedAvatarId(delta: number): void {
+    if (!this.editorMode) {
+      return;
+    }
+
+    const nextAvatarId = this.stepAvatarId(this.selectedAvatarId, delta);
+    if (nextAvatarId === this.selectedAvatarId) {
+      return;
+    }
+
+    this.selectedAvatarId = nextAvatarId;
+    this.updateTemplateHud();
+    if (this.localPlayerId) {
+      this.sendLocalPlayerUpdate({ recordPrediction: false });
+    }
+  }
+
   private updateTemplateHud(): void {
     const selectedSphere = this.getSelectedEditableSphere();
     const selectedTemplateId = this.readTemplateId(selectedSphere);
@@ -1361,6 +1440,7 @@ export class GameApp {
     this.selectedTemplateValueNode.textContent = selectedSphere
       ? `${selectedTemplateId}`
       : "none";
+    this.avatarValueNode.textContent = avatarLabel(this.selectedAvatarId);
 
     const createEnabled = this.editorMode;
     const selectedEnabled = this.editorMode && selectedSphere !== null;
@@ -1369,6 +1449,8 @@ export class GameApp {
     this.createTemplateIncreaseButton.disabled = !createEnabled;
     this.selectedTemplateDecreaseButton.disabled = !selectedEnabled;
     this.selectedTemplateIncreaseButton.disabled = !selectedEnabled;
+    this.avatarDecreaseButton.disabled = !createEnabled;
+    this.avatarIncreaseButton.disabled = !createEnabled;
     this.selectedColorRowNode.hidden = !selectedEnabled;
     this.selectedColorInputNode.disabled = !selectedEnabled;
     this.selectedColorInputNode.value = this.encodeColorInputValue(selectedSphereColor);
@@ -1808,6 +1890,7 @@ export class GameApp {
       );
       const normalizedYaw = this.normalizeAngleRadians(remotePlayer.yaw);
       const normalizedPitch = this.normalizeAngleRadians(remotePlayer.pitch);
+      const normalizedAvatarId = normalizeAvatarId(remotePlayer.avatar_id);
       const createdState: RemotePlayerRenderState = {
         renderPosition: spawnPosition.clone(),
         targetPosition: spawnPosition,
@@ -1815,6 +1898,7 @@ export class GameApp {
         targetYaw: normalizedYaw,
         renderPitch: normalizedPitch,
         targetPitch: normalizedPitch,
+        avatarId: normalizedAvatarId,
         lastServerTick: normalizedServerTick,
       };
       this.remotePlayerRenderStates.set(playerId, createdState);
@@ -1832,6 +1916,7 @@ export class GameApp {
     );
     existingState.targetYaw = this.normalizeAngleRadians(remotePlayer.yaw);
     existingState.targetPitch = this.normalizeAngleRadians(remotePlayer.pitch);
+    existingState.avatarId = normalizeAvatarId(remotePlayer.avatar_id);
     existingState.lastServerTick = normalizedServerTick;
     return existingState;
   }
@@ -1847,8 +1932,8 @@ export class GameApp {
     }
 
     for (const [playerId, renderState] of this.remotePlayerRenderStates) {
-      const avatar = this.remotePlayerAvatars.get(playerId);
-      if (!avatar) {
+      const avatarInstance = this.remotePlayerAvatars.get(playerId);
+      if (!avatarInstance) {
         continue;
       }
 
@@ -1876,7 +1961,7 @@ export class GameApp {
       );
 
       this.applyRemotePlayerRenderPose(
-        avatar,
+        avatarInstance.handle,
         renderState.renderPosition,
         renderState.renderYaw,
         renderState.renderPitch,
@@ -1941,9 +2026,9 @@ export class GameApp {
     renderState: RemotePlayerRenderState,
   ): void {
     const existingAvatar = this.remotePlayerAvatars.get(playerId);
-    if (existingAvatar) {
+    if (existingAvatar && existingAvatar.avatarId === renderState.avatarId) {
       this.applyRemotePlayerRenderPose(
-        existingAvatar,
+        existingAvatar.handle,
         renderState.renderPosition,
         renderState.renderYaw,
         renderState.renderPitch,
@@ -1951,7 +2036,16 @@ export class GameApp {
       return;
     }
 
-    const avatar = createRemoteAvatarHandle();
+    if (existingAvatar) {
+      this.scene.remove(existingAvatar.handle.object3d);
+      existingAvatar.handle.dispose();
+      this.remotePlayerAvatars.delete(playerId);
+    }
+
+    const avatar = createRemoteAvatarHandle({
+      avatarId: renderState.avatarId,
+      playerId,
+    });
     this.applyRemotePlayerRenderPose(
       avatar,
       renderState.renderPosition,
@@ -1959,17 +2053,20 @@ export class GameApp {
       renderState.renderPitch,
     );
     this.scene.add(avatar.object3d);
-    this.remotePlayerAvatars.set(playerId, avatar);
+    this.remotePlayerAvatars.set(playerId, {
+      avatarId: renderState.avatarId,
+      handle: avatar,
+    });
   }
 
   private removeRemotePlayerMesh(playerId: string): void {
-    const avatar = this.remotePlayerAvatars.get(playerId);
-    if (!avatar) {
+    const avatarInstance = this.remotePlayerAvatars.get(playerId);
+    if (!avatarInstance) {
       return;
     }
 
-    this.scene.remove(avatar.object3d);
-    avatar.dispose();
+    this.scene.remove(avatarInstance.handle.object3d);
+    avatarInstance.handle.dispose();
     this.remotePlayerAvatars.delete(playerId);
   }
 
@@ -2280,6 +2377,30 @@ export class GameApp {
     this.renderer.render(this.scene, this.camera);
   };
 
+  private sendLocalPlayerUpdate(options: { recordPrediction: boolean } = { recordPrediction: true }): void {
+    const orientation = this.controller.getOrientation();
+    const inputSequence = this.nextPlayerInputSequence();
+
+    if (options.recordPrediction) {
+      this.recordPredictedInput({
+        sequence: inputSequence,
+        simulationTick: this.tick,
+        position3d: [this.player.position.x, this.player.position.y, this.player.position.z],
+        yaw: orientation.yaw,
+        pitch: orientation.pitch,
+      });
+    }
+
+    this.multiplayerClient.sendPlayerUpdate(
+      [this.player.position.x, this.player.position.y, this.player.position.z],
+      orientation.yaw,
+      orientation.pitch,
+      inputSequence,
+      this.selectedAvatarId,
+    );
+    this.lastNetworkSendTick = this.tick;
+  }
+
   private updateFixed(dt: number): void {
     this.tick += 1;
     const input = this.controller.sampleInput();
@@ -2325,22 +2446,7 @@ export class GameApp {
     this.updateDraggedSphere(orientation);
 
     if (this.tick - this.lastNetworkSendTick >= NETWORK_SEND_INTERVAL_TICKS) {
-      const orientation = this.controller.getOrientation();
-      const inputSequence = this.nextPlayerInputSequence();
-      this.recordPredictedInput({
-        sequence: inputSequence,
-        simulationTick: this.tick,
-        position3d: [this.player.position.x, this.player.position.y, this.player.position.z],
-        yaw: orientation.yaw,
-        pitch: orientation.pitch,
-      });
-      this.multiplayerClient.sendPlayerUpdate(
-        [this.player.position.x, this.player.position.y, this.player.position.z],
-        orientation.yaw,
-        orientation.pitch,
-        inputSequence,
-      );
-      this.lastNetworkSendTick = this.tick;
+      this.sendLocalPlayerUpdate({ recordPrediction: true });
     }
   }
 
@@ -2597,6 +2703,7 @@ export class GameApp {
       `editor: ${this.editorMode ? "on" : "off"}\n` +
       `dragging: ${this.draggingSphereId ?? "none"}\n` +
       `create template: ${this.createTemplateId}\n` +
+      `avatar: ${this.selectedAvatarId}\n` +
       `selected: ${selectedSphereId ?? "none"}\n` +
       `world id: ${this.currentWorldId}\n` +
       `levels: ${this.availableWorldIds.length}\n` +

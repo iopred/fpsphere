@@ -5,6 +5,7 @@ export interface RemotePlayerState {
   position_3d: [number, number, number];
   yaw: number;
   pitch: number;
+  avatar_id: string;
   last_processed_input_tick: number;
 }
 
@@ -59,6 +60,7 @@ interface PlayerUpdateMessage {
   yaw: number;
   pitch: number;
   client_tick: number;
+  avatar_id?: string;
 }
 
 interface HelloMessage {
@@ -186,6 +188,7 @@ export class MultiplayerClient {
     yaw: number,
     pitch: number,
     inputSequence: number,
+    avatarId?: string,
   ): void {
     this.send({
       type: "player_update",
@@ -193,6 +196,7 @@ export class MultiplayerClient {
       yaw,
       pitch,
       client_tick: inputSequence,
+      avatar_id: avatarId,
     });
   }
 

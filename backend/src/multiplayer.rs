@@ -7,6 +7,20 @@ use tokio::sync::{broadcast, RwLock};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 
 const SNAPSHOT_TICK_INTERVAL: Duration = Duration::from_micros(16_666);
+const DEFAULT_AVATAR_ID: &str = "duck";
+
+fn normalize_avatar_id_option(raw_avatar_id: Option<&str>) -> Option<String> {
+    let normalized = raw_avatar_id?.trim();
+    if normalized.is_empty() {
+        return None;
+    }
+
+    match normalized {
+        "duck" => Some("duck".to_string()),
+        "human" => Some("human".to_string()),
+        _ => Some(DEFAULT_AVATAR_ID.to_string()),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerInputEnqueueResult {
@@ -15,12 +29,13 @@ pub enum PlayerInputEnqueueResult {
     PlayerMissing,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct PlayerInputCommand {
     client_tick: u64,
     position_3d: [f32; 3],
     yaw: f32,
     pitch: f32,
+    avatar_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +46,7 @@ pub struct MultiplayerPlayerState {
     pub position_3d: [f32; 3],
     pub yaw: f32,
     pub pitch: f32,
+    pub avatar_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +55,7 @@ pub struct MultiplayerPlayerSnapshot {
     pub position_3d: [f32; 3],
     pub yaw: f32,
     pub pitch: f32,
+    pub avatar_id: String,
     pub last_processed_input_tick: u64,
 }
 
@@ -54,6 +71,8 @@ pub enum ClientMultiplayerMessage {
         yaw: f32,
         pitch: f32,
         client_tick: u64,
+        #[serde(default)]
+        avatar_id: Option<String>,
     },
     Ping,
 }
@@ -117,6 +136,7 @@ impl AuthoritativePlayerStore {
         position_3d: [f32; 3],
         yaw: f32,
         pitch: f32,
+        avatar_id: Option<String>,
     ) -> PlayerInputEnqueueResult {
         if !self.world_by_player_id.contains_key(player_id) {
             return PlayerInputEnqueueResult::PlayerMissing;
@@ -145,6 +165,7 @@ impl AuthoritativePlayerStore {
                 position_3d,
                 yaw,
                 pitch,
+                avatar_id: normalize_avatar_id_option(avatar_id.as_deref()),
             },
         );
         PlayerInputEnqueueResult::Queued
@@ -166,7 +187,7 @@ impl AuthoritativePlayerStore {
                 continue;
             }
 
-            let commands = queue.values().copied().collect::<Vec<_>>();
+            let commands = queue.values().cloned().collect::<Vec<_>>();
             queue.clear();
 
             let mut next_processed = self
@@ -183,6 +204,9 @@ impl AuthoritativePlayerStore {
                     player.position_3d = command.position_3d;
                     player.yaw = command.yaw;
                     player.pitch = command.pitch;
+                    if let Some(avatar_id) = command.avatar_id {
+                        player.avatar_id = avatar_id;
+                    }
                     next_processed = Some(command.client_tick);
                 }
             }
@@ -251,6 +275,7 @@ impl AuthoritativePlayerStore {
                 position_3d: item.position_3d,
                 yaw: item.yaw,
                 pitch: item.pitch,
+                avatar_id: item.avatar_id.clone(),
                 last_processed_input_tick: self
                     .last_processed_input_seq_by_player
                     .get(&item.player_id)
@@ -354,6 +379,7 @@ impl MultiplayerHub {
             position_3d: [0.0, -2.5, 16.0],
             yaw: 0.0,
             pitch: 0.0,
+            avatar_id: DEFAULT_AVATAR_ID.to_string(),
         };
 
         self.players
@@ -386,6 +412,7 @@ impl MultiplayerHub {
         yaw: f32,
         pitch: f32,
         client_tick: u64,
+        avatar_id: Option<String>,
     ) -> PlayerInputEnqueueResult {
         self.players.write().await.update_player_pose(
             player_id,
@@ -393,6 +420,7 @@ impl MultiplayerHub {
             position_3d,
             yaw,
             pitch,
+            avatar_id,
         )
     }
 
@@ -447,7 +475,7 @@ mod tests {
             .await;
 
         let updated = hub
-            .update_player(&player.player_id, [2.0, 3.0, 4.0], 1.0, 0.5, 7)
+            .update_player(&player.player_id, [2.0, 3.0, 4.0], 1.0, 0.5, 7, None)
             .await;
         assert!(matches!(updated, PlayerInputEnqueueResult::Queued));
 
@@ -462,13 +490,13 @@ mod tests {
             .await;
 
         let first = hub
-            .update_player(&player.player_id, [1.0, 2.0, 3.0], 0.1, 0.2, 1)
+            .update_player(&player.player_id, [1.0, 2.0, 3.0], 0.1, 0.2, 1, None)
             .await;
         assert!(matches!(first, PlayerInputEnqueueResult::Queued));
 
         // Duplicate queued sequence is dropped.
         let duplicate_pending = hub
-            .update_player(&player.player_id, [5.0, 6.0, 7.0], 0.6, 0.7, 1)
+            .update_player(&player.player_id, [5.0, 6.0, 7.0], 0.6, 0.7, 1, None)
             .await;
         assert!(matches!(
             duplicate_pending,
@@ -479,7 +507,7 @@ mod tests {
 
         // Already-processed sequence is dropped as stale.
         let stale = hub
-            .update_player(&player.player_id, [8.0, 9.0, 10.0], 0.8, 0.9, 1)
+            .update_player(&player.player_id, [8.0, 9.0, 10.0], 0.8, 0.9, 1, None)
             .await;
         assert!(matches!(
             stale,
@@ -487,7 +515,7 @@ mod tests {
         ));
 
         let next = hub
-            .update_player(&player.player_id, [11.0, 12.0, 13.0], 1.1, 1.2, 2)
+            .update_player(&player.player_id, [11.0, 12.0, 13.0], 1.1, 1.2, 2, None)
             .await;
         assert!(matches!(next, PlayerInputEnqueueResult::Queued));
 
@@ -533,6 +561,103 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn player_avatar_id_is_applied_and_normalized() {
+        let hub = MultiplayerHub::new_without_snapshot_loop();
+        let mut rx = hub.subscribe();
+        let player = hub
+            .add_player("user-avatar".to_string(), "world-main".to_string())
+            .await;
+
+        let human_update = hub
+            .update_player(
+                &player.player_id,
+                [1.0, 0.0, 0.0],
+                0.0,
+                0.0,
+                1,
+                Some("human".to_string()),
+            )
+            .await;
+        assert!(matches!(human_update, PlayerInputEnqueueResult::Queued));
+
+        hub.process_queued_inputs().await;
+        hub.broadcast_world_snapshot("world-main").await;
+
+        let first_result = timeout(Duration::from_millis(200), async {
+            loop {
+                let received = rx.recv().await.expect("state snapshot message");
+                match received {
+                    ServerMultiplayerMessage::StateSnapshot {
+                        world_id, players, ..
+                    } => {
+                        if world_id != "world-main" {
+                            continue;
+                        }
+
+                        if let Some(player_snapshot) = players
+                            .iter()
+                            .find(|item| item.player_id == player.player_id)
+                        {
+                            assert_eq!(player_snapshot.avatar_id, "human");
+                            return;
+                        }
+                    }
+                    _ => continue,
+                }
+            }
+        })
+        .await;
+        assert!(
+            first_result.is_ok(),
+            "expected avatar snapshot within timeout"
+        );
+
+        let invalid_update = hub
+            .update_player(
+                &player.player_id,
+                [2.0, 0.0, 0.0],
+                0.0,
+                0.0,
+                2,
+                Some("robot".to_string()),
+            )
+            .await;
+        assert!(matches!(invalid_update, PlayerInputEnqueueResult::Queued));
+
+        hub.process_queued_inputs().await;
+        hub.broadcast_world_snapshot("world-main").await;
+
+        let second_result = timeout(Duration::from_millis(200), async {
+            loop {
+                let received = rx.recv().await.expect("state snapshot message");
+                match received {
+                    ServerMultiplayerMessage::StateSnapshot {
+                        world_id, players, ..
+                    } => {
+                        if world_id != "world-main" {
+                            continue;
+                        }
+
+                        if let Some(player_snapshot) = players
+                            .iter()
+                            .find(|item| item.player_id == player.player_id)
+                        {
+                            assert_eq!(player_snapshot.avatar_id, "duck");
+                            return;
+                        }
+                    }
+                    _ => continue,
+                }
+            }
+        })
+        .await;
+        assert!(
+            second_result.is_ok(),
+            "expected normalized avatar snapshot within timeout"
+        );
+    }
+
+    #[tokio::test]
     async fn queued_input_applies_in_tick_order_not_arrival_order() {
         let hub = MultiplayerHub::new_without_snapshot_loop();
         let mut rx = hub.subscribe();
@@ -542,13 +667,13 @@ mod tests {
 
         // Intentionally enqueue out of order.
         let third = hub
-            .update_player(&player.player_id, [30.0, 0.0, 0.0], 0.3, 0.3, 3)
+            .update_player(&player.player_id, [30.0, 0.0, 0.0], 0.3, 0.3, 3, None)
             .await;
         let first = hub
-            .update_player(&player.player_id, [10.0, 0.0, 0.0], 0.1, 0.1, 1)
+            .update_player(&player.player_id, [10.0, 0.0, 0.0], 0.1, 0.1, 1, None)
             .await;
         let second = hub
-            .update_player(&player.player_id, [20.0, 0.0, 0.0], 0.2, 0.2, 2)
+            .update_player(&player.player_id, [20.0, 0.0, 0.0], 0.2, 0.2, 2, None)
             .await;
 
         assert!(matches!(first, PlayerInputEnqueueResult::Queued));
@@ -776,6 +901,7 @@ mod tests {
                         sequence as f32 * 0.01,
                         0.0,
                         sequence,
+                        None,
                     )
                     .await;
                 assert!(matches!(enqueue, PlayerInputEnqueueResult::Queued));

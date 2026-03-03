@@ -10,6 +10,8 @@ import {
 } from "../game/multiplayerClient";
 import {
   createRemoteAvatarHandle,
+  normalizeAvatarId,
+  type AvatarId,
   type AvatarRenderHandle,
 } from "../game/avatarRenderAdapter";
 import { LocalWorldStore, type WorldStoreSnapshot } from "../game/worldStore";
@@ -91,6 +93,11 @@ interface QrDetector {
   detect(source: HTMLVideoElement): Promise<DetectedBarcodeLike[]>;
   getDescription(): string;
   dispose?(): void;
+}
+
+interface RemoteAvatarInstance {
+  avatarId: AvatarId;
+  handle: AvatarRenderHandle;
 }
 
 class NativeBarcodeQrDetector implements QrDetector {
@@ -287,7 +294,7 @@ export class FpsphereArApp {
 
   private readonly multiplayerClient = new MultiplayerClient();
   private readonly remotePlayers = new Map<string, RemotePlayerState>();
-  private readonly remotePlayerAvatars = new Map<string, AvatarRenderHandle>();
+  private readonly remotePlayerAvatars = new Map<string, RemoteAvatarInstance>();
 
   private readonly rootNode: HTMLDivElement;
   private readonly videoNode: HTMLVideoElement;
@@ -842,20 +849,33 @@ export class FpsphereArApp {
   }
 
   private upsertRemotePlayerMesh(remotePlayer: RemotePlayerState): void {
+    const normalizedAvatarId = normalizeAvatarId(remotePlayer.avatar_id);
     const existingAvatar = this.remotePlayerAvatars.get(remotePlayer.player_id);
     const x = remotePlayer.position_3d[0] - this.parentCenter.x;
     const y = remotePlayer.position_3d[1] - this.parentCenter.y;
     const z = remotePlayer.position_3d[2] - this.parentCenter.z;
 
-    if (existingAvatar) {
-      existingAvatar.applyPose(x, y, z, remotePlayer.yaw, remotePlayer.pitch);
+    if (existingAvatar && existingAvatar.avatarId === normalizedAvatarId) {
+      existingAvatar.handle.applyPose(x, y, z, remotePlayer.yaw, remotePlayer.pitch);
       return;
     }
 
-    const avatar = createRemoteAvatarHandle();
+    if (existingAvatar) {
+      this.worldContentGroup.remove(existingAvatar.handle.object3d);
+      existingAvatar.handle.dispose();
+      this.remotePlayerAvatars.delete(remotePlayer.player_id);
+    }
+
+    const avatar = createRemoteAvatarHandle({
+      avatarId: normalizedAvatarId,
+      playerId: remotePlayer.player_id,
+    });
     avatar.applyPose(x, y, z, remotePlayer.yaw, remotePlayer.pitch);
     this.worldContentGroup.add(avatar.object3d);
-    this.remotePlayerAvatars.set(remotePlayer.player_id, avatar);
+    this.remotePlayerAvatars.set(remotePlayer.player_id, {
+      avatarId: normalizedAvatarId,
+      handle: avatar,
+    });
   }
 
   private removeRemotePlayerMesh(playerId: string): void {
@@ -864,8 +884,8 @@ export class FpsphereArApp {
       return;
     }
 
-    this.worldContentGroup.remove(avatar.object3d);
-    avatar.dispose();
+    this.worldContentGroup.remove(avatar.handle.object3d);
+    avatar.handle.dispose();
     this.remotePlayerAvatars.delete(playerId);
   }
 
