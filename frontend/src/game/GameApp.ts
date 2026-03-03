@@ -46,6 +46,10 @@ import {
   type AvatarId,
   type AvatarRenderHandle,
 } from "./avatarRenderAdapter";
+import {
+  planRemoteAvatarSnapshot,
+  planRemoteAvatarWorldSwitch,
+} from "./remoteAvatarLifecycle";
 
 const FIXED_STEP_SECONDS = 1 / 60;
 const MOVE_SPEED = 18;
@@ -1719,14 +1723,13 @@ export class GameApp {
 
     this.applyLocalPredictionAck(snapshot);
 
-    const nextIds = new Set<string>();
-    for (const remotePlayer of snapshot.players) {
-      if (remotePlayer.player_id === this.localPlayerId) {
-        continue;
-      }
-
+    const plan = planRemoteAvatarSnapshot(
+      snapshot.players,
+      this.localPlayerId,
+      this.remotePlayerRenderStates.keys(),
+    );
+    for (const remotePlayer of plan.upsertPlayers) {
       const playerId = remotePlayer.player_id;
-      nextIds.add(playerId);
       const renderState = this.upsertRemotePlayerRenderState(
         remotePlayer,
         snapshot.server_tick,
@@ -1734,10 +1737,7 @@ export class GameApp {
       this.upsertRemotePlayerMesh(playerId, renderState);
     }
 
-    for (const existingId of [...this.remotePlayerRenderStates.keys()]) {
-      if (nextIds.has(existingId)) {
-        continue;
-      }
+    for (const existingId of plan.removePlayerIds) {
       this.remotePlayerRenderStates.delete(existingId);
       this.removeRemotePlayerMesh(existingId);
     }
@@ -2073,7 +2073,7 @@ export class GameApp {
   }
 
   private clearRemotePlayers(): void {
-    for (const playerId of [...this.remotePlayerAvatars.keys()]) {
+    for (const playerId of planRemoteAvatarWorldSwitch(this.remotePlayerAvatars.keys())) {
       this.removeRemotePlayerMesh(playerId);
     }
     this.remotePlayerRenderStates.clear();

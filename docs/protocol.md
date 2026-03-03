@@ -13,7 +13,7 @@
   - response: `WorldSnapshot`
 - `DELETE /api/v1/world/:world_id`
   - response: `204 No Content`
-- `GET /api/v1/world/:world_id?user_id=<id>`
+- `GET /api/v1/world/:world_id?user_id=<id>&tick=<u64>&window_start_tick=<u64>&window_end_tick=<u64>`
   - response: user branch `WorldSnapshot` if it exists, otherwise master
 - `POST /api/v1/world/:world_id/commit`
   - request: `CommitRequest`
@@ -40,6 +40,21 @@
   ]
 }
 ```
+
+## Temporal World Query Contract (S4-T1/S4-T2)
+
+- Query parameters on `GET /api/v1/world/:world_id`:
+  - `tick` (optional): target logical tick for deterministic temporal queries.
+  - `window_start_tick` (optional): lower bound of temporal window (inclusive).
+  - `window_end_tick` (optional): upper bound of temporal window (inclusive).
+- Validation rules:
+  - `window_end_tick` requires `window_start_tick`.
+  - `window_end_tick` must be `>= window_start_tick`.
+  - If `tick` and window bounds are both provided, `tick` must fall inside the provided window.
+- Current behavior in S4-T1:
+  - Request contract and validation are active.
+  - Snapshot filtering by `tick` / window is active for `GET /api/v1/world/:world_id`.
+  - Filtering keeps parent-child consistency: a child entity is only returned when its parent is also returned.
 
 ## CommitRequest (Rust API)
 

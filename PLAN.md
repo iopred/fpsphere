@@ -456,15 +456,15 @@ Goal: ship a mesh-ready avatar pipeline for multiplayer players.
 - [x] `S3-A3` Render a default orientation-readable avatar mesh (not sphere-only).
 - [x] `S3-A4` Add avatar style/config hooks (materials/colors/scale) keyed by player id.
 - [x] `S3-A6` Add dedicated avatar editor app mode (`?mode=avatar`) for live layout tuning and persisted overrides.
-- [ ] `S3-A5` Add regression checks for avatar lifecycle (spawn/update/remove/world-switch).
+- [x] `S3-A5` Add regression checks for avatar lifecycle (spawn/update/remove/world-switch).
 
 ### 13.2 Sprint 4 Plan (M4 Temporal Queries + Animation Feedback)
 
 Sprint window: 2026-03-16 to 2026-03-27  
 Goal: use `time_window` for deterministic temporal querying and editor feedback animation.
 
-- [ ] `S4-T1` Define temporal query contract (`tick`, window filtering semantics).
-- [ ] `S4-T2` Implement runtime/store filtering by `time_window`.
+- [x] `S4-T1` Define temporal query contract (`tick`, window filtering semantics).
+- [x] `S4-T2` Implement runtime/store filtering by `time_window`.
 - [ ] `S4-T3` Add template-placement creation playback animation driven by `time_window`.
 - [ ] `S4-T4` Add temporal regression tests for deterministic query/playback behavior.
 

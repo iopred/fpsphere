@@ -12,7 +12,7 @@ use multiplayer::{
 };
 use protocol::{
     example_world_snapshot, CommitFailure, CommitRequest, CommitResponse, CommitTarget,
-    WorldMutationFailure, WorldRepository, WorldSnapshot,
+    TemporalWorldQuery, WorldMutationFailure, WorldRepository, WorldSnapshot,
 };
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -35,6 +35,9 @@ struct HealthResponse {
 #[derive(Debug, Deserialize)]
 struct GetWorldQuery {
     user_id: Option<String>,
+    tick: Option<u64>,
+    window_start_tick: Option<u64>,
+    window_end_tick: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -178,8 +181,22 @@ async fn get_world_snapshot(
     Query(query): Query<GetWorldQuery>,
     State(state): State<AppState>,
 ) -> Result<Json<WorldSnapshot>, StatusCode> {
+    let temporal_query = TemporalWorldQuery {
+        tick: query.tick,
+        window_start_tick: query.window_start_tick,
+        window_end_tick: query.window_end_tick,
+    };
+    if temporal_query.validate().is_err() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let resolved_temporal_query = (!temporal_query.is_empty()).then_some(temporal_query);
+
     let repository = state.repository.read().await;
-    let snapshot = repository.get_world_snapshot(&world_id, query.user_id.as_deref());
+    let snapshot = repository.get_world_snapshot_with_query(
+        &world_id,
+        query.user_id.as_deref(),
+        resolved_temporal_query,
+    );
 
     match snapshot {
         Some(world) => Ok(Json(world)),

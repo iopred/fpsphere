@@ -16,32 +16,36 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function backendSnapshotPayload() {
+  return {
+    world_id: "world-main",
+    tick: 12,
+    entities: [
+      {
+        id: "sphere-world-001",
+        parent_id: null,
+        radius: 60,
+        position_3d: [0, 0, 0],
+        dimensions: { money: 0 },
+        time_window: { start_tick: 0, end_tick: null },
+        tags: ["world"],
+      },
+      {
+        id: "sphere-building-001",
+        parent_id: "sphere-world-001",
+        radius: 9,
+        position_3d: [1, 2, 3],
+        dimensions: { money: 0.2 },
+        time_window: { start_tick: 0, end_tick: null },
+        tags: ["building"],
+      },
+    ],
+  };
+}
+
 describe("worldApi", () => {
   it("maps backend snapshot schema to loaded world", async () => {
-    const payload = {
-      world_id: "world-main",
-      tick: 12,
-      entities: [
-        {
-          id: "sphere-world-001",
-          parent_id: null,
-          radius: 60,
-          position_3d: [0, 0, 0],
-          dimensions: { money: 0 },
-          time_window: { start_tick: 0, end_tick: null },
-          tags: ["world"],
-        },
-        {
-          id: "sphere-building-001",
-          parent_id: "sphere-world-001",
-          radius: 9,
-          position_3d: [1, 2, 3],
-          dimensions: { money: 0.2 },
-          time_window: { start_tick: 0, end_tick: null },
-          tags: ["building"],
-        },
-      ],
-    };
+    const payload = backendSnapshotPayload();
 
     globalThis.fetch = vi.fn(async () => {
       return new Response(JSON.stringify(payload), {
@@ -57,6 +61,99 @@ describe("worldApi", () => {
     expect(loaded.world.children).toHaveLength(1);
     expect(loaded.world.children[0].id).toBe("sphere-building-001");
     expect(loaded.world.children[0].position3d).toEqual([1, 2, 3]);
+  });
+
+  it("sends temporal query params for world snapshot fetch", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe(
+        "/api/v1/world/world-main?user_id=user-1&tick=12&window_start_tick=8&window_end_tick=14",
+      );
+
+      return new Response(JSON.stringify(backendSnapshotPayload()), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    globalThis.fetch = fetchMock as typeof globalThis.fetch;
+
+    await fetchWorldSeed("world-main", "user-1", {
+      tick: 12,
+      windowStartTick: 8,
+      windowEndTick: 14,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects invalid temporal query combinations", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(JSON.stringify(backendSnapshotPayload()), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof globalThis.fetch;
+
+    await expect(
+      fetchWorldSeed("world-main", "user-1", {
+        windowEndTick: 9,
+      }),
+    ).rejects.toThrow("windowEndTick requires windowStartTick");
+
+    await expect(
+      fetchWorldSeed("world-main", "user-1", {
+        windowStartTick: 9,
+        windowEndTick: 7,
+      }),
+    ).rejects.toThrow("windowEndTick must be >= windowStartTick");
+
+    await expect(
+      fetchWorldSeed("world-main", "user-1", {
+        tick: 2,
+        windowStartTick: 3,
+        windowEndTick: 7,
+      }),
+    ).rejects.toThrow("tick must be >= windowStartTick");
+  });
+
+  it("applies temporal filtering to loaded world entities", async () => {
+    const payload = backendSnapshotPayload();
+    payload.entities.push(
+      {
+        id: "sphere-temporal-future-001",
+        parent_id: "sphere-world-001",
+        radius: 2,
+        position_3d: [4, 1, 1],
+        dimensions: { money: 0.1 },
+        time_window: { start_tick: 20, end_tick: null },
+        tags: ["future"],
+      },
+      {
+        id: "sphere-temporal-window-001",
+        parent_id: "sphere-world-001",
+        radius: 2,
+        position_3d: [5, 1, 1],
+        dimensions: { money: 0.1 },
+        time_window: { start_tick: 3, end_tick: 9 },
+        tags: ["windowed"],
+      },
+    );
+
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof globalThis.fetch;
+
+    const loaded = await fetchWorldSeed("world-main", "user-1", {
+      tick: 6,
+      windowStartTick: 4,
+      windowEndTick: 8,
+    });
+    const childIds = loaded.world.children.map((entity) => entity.id);
+
+    expect(childIds).toContain("sphere-temporal-window-001");
+    expect(childIds).not.toContain("sphere-temporal-future-001");
   });
 
   it("sends commit payload and maps commit response", async () => {

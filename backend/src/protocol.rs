@@ -25,6 +25,42 @@ pub struct WorldSnapshot {
     pub entities: Vec<SphereEntity>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TemporalWorldQuery {
+    pub tick: Option<u64>,
+    pub window_start_tick: Option<u64>,
+    pub window_end_tick: Option<u64>,
+}
+
+impl TemporalWorldQuery {
+    pub fn is_empty(&self) -> bool {
+        self.tick.is_none() && self.window_start_tick.is_none() && self.window_end_tick.is_none()
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        let (window_start_tick, window_end_tick) = match (self.window_start_tick, self.window_end_tick) {
+            (None, Some(_)) => {
+                return Err("window_end_tick requires window_start_tick".to_string())
+            }
+            (Some(start_tick), Some(end_tick)) if end_tick < start_tick => {
+                return Err("window_end_tick must be >= window_start_tick".to_string())
+            }
+            values => values,
+        };
+
+        if let Some(tick) = self.tick {
+            if window_start_tick.is_some_and(|start_tick| tick < start_tick) {
+                return Err("tick must be >= window_start_tick when both are provided".to_string());
+            }
+            if window_end_tick.is_some_and(|end_tick| tick > end_tick) {
+                return Err("tick must be <= window_end_tick when both are provided".to_string());
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CommitTarget {
@@ -142,6 +178,15 @@ impl WorldRepository {
         world_id: &str,
         user_id: Option<&str>,
     ) -> Option<WorldSnapshot> {
+        self.get_world_snapshot_with_query(world_id, user_id, None)
+    }
+
+    pub fn get_world_snapshot_with_query(
+        &self,
+        world_id: &str,
+        user_id: Option<&str>,
+        temporal_query: Option<TemporalWorldQuery>,
+    ) -> Option<WorldSnapshot> {
         if let Some(user_id_value) = user_id {
             if let Some(snapshot) = self
                 .user_worlds
@@ -149,13 +194,17 @@ impl WorldRepository {
             {
                 let mut projected = snapshot.clone();
                 compact_shared_template_legacy_descendants(&mut projected);
-                return Some(projected);
+                return Some(filter_world_snapshot_by_time_window(
+                    projected,
+                    temporal_query.unwrap_or_default(),
+                ));
             }
         }
 
-        self.masters.get(world_id).cloned().map(|mut snapshot| {
+        self.masters.get(world_id).cloned().map(|snapshot| {
+            let mut snapshot = snapshot;
             compact_shared_template_legacy_descendants(&mut snapshot);
-            snapshot
+            filter_world_snapshot_by_time_window(snapshot, temporal_query.unwrap_or_default())
         })
     }
 
@@ -308,6 +357,99 @@ impl WorldRepository {
                 validation_errors: errors,
             }),
         }
+    }
+}
+
+fn is_entity_active_at_tick(entity: &SphereEntity, tick: u64) -> bool {
+    if tick < entity.time_window.start_tick {
+        return false;
+    }
+
+    entity
+        .time_window
+        .end_tick
+        .map_or(true, |end_tick| tick <= end_tick)
+}
+
+fn does_entity_overlap_window(
+    entity: &SphereEntity,
+    window_start_tick: u64,
+    window_end_tick: Option<u64>,
+) -> bool {
+    let entity_start_tick = entity.time_window.start_tick;
+    let entity_end_tick = entity.time_window.end_tick;
+
+    if let Some(end_tick) = window_end_tick {
+        if entity_start_tick > end_tick {
+            return false;
+        }
+    }
+
+    entity_end_tick.map_or(true, |end_tick| end_tick >= window_start_tick)
+}
+
+fn is_entity_time_visible(entity: &SphereEntity, query: TemporalWorldQuery) -> bool {
+    if let Some(tick) = query.tick {
+        if !is_entity_active_at_tick(entity, tick) {
+            return false;
+        }
+    }
+
+    if let Some(window_start_tick) = query.window_start_tick {
+        if !does_entity_overlap_window(entity, window_start_tick, query.window_end_tick) {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn filter_world_snapshot_by_time_window(
+    snapshot: WorldSnapshot,
+    query: TemporalWorldQuery,
+) -> WorldSnapshot {
+    if query.is_empty() {
+        return snapshot;
+    }
+
+    let mut included_ids = snapshot
+        .entities
+        .iter()
+        .filter(|entity| entity.parent_id.is_none())
+        .map(|entity| entity.id.clone())
+        .collect::<HashSet<_>>();
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for entity in &snapshot.entities {
+            if included_ids.contains(&entity.id) {
+                continue;
+            }
+
+            let Some(parent_id) = entity.parent_id.as_deref() else {
+                continue;
+            };
+            if !included_ids.contains(parent_id) {
+                continue;
+            }
+            if !is_entity_time_visible(entity, query) {
+                continue;
+            }
+
+            included_ids.insert(entity.id.clone());
+            changed = true;
+        }
+    }
+
+    WorldSnapshot {
+        world_id: snapshot.world_id,
+        tick: snapshot.tick,
+        entities: snapshot
+            .entities
+            .into_iter()
+            .filter(|entity| included_ids.contains(&entity.id))
+            .collect(),
     }
 }
 
@@ -702,7 +844,7 @@ pub fn example_world_snapshot() -> WorldSnapshot {
 mod tests {
     use super::{
         example_world_snapshot, CommitOperation, CommitRequest, CommitTarget, SphereEntity,
-        TimeWindow, WorldMutationFailure, WorldRepository,
+        TemporalWorldQuery, TimeWindow, WorldMutationFailure, WorldRepository,
     };
     use std::collections::BTreeMap;
 
@@ -802,6 +944,26 @@ mod tests {
         }
     }
 
+    fn make_time_windowed_sphere(
+        id: &str,
+        parent_id: &str,
+        start_tick: u64,
+        end_tick: Option<u64>,
+    ) -> SphereEntity {
+        SphereEntity {
+            id: id.to_string(),
+            parent_id: Some(parent_id.to_string()),
+            radius: 2.0,
+            position_3d: [0.0, 0.0, 0.0],
+            dimensions: BTreeMap::new(),
+            time_window: TimeWindow {
+                start_tick,
+                end_tick,
+            },
+            tags: vec!["temporal-test".to_string()],
+        }
+    }
+
     #[test]
     fn list_world_ids_returns_master_world() {
         let repository = WorldRepository::new(example_world_snapshot());
@@ -881,6 +1043,142 @@ mod tests {
             .entities
             .iter()
             .any(|entity| entity.id == "sphere-legacy-host-grandchild-001"));
+    }
+
+    #[test]
+    fn temporal_world_query_validation_rules() {
+        let missing_start = TemporalWorldQuery {
+            tick: None,
+            window_start_tick: None,
+            window_end_tick: Some(5),
+        };
+        assert!(missing_start.validate().is_err());
+
+        let reversed_window = TemporalWorldQuery {
+            tick: None,
+            window_start_tick: Some(9),
+            window_end_tick: Some(8),
+        };
+        assert!(reversed_window.validate().is_err());
+
+        let out_of_range_tick = TemporalWorldQuery {
+            tick: Some(10),
+            window_start_tick: Some(1),
+            window_end_tick: Some(9),
+        };
+        assert!(out_of_range_tick.validate().is_err());
+
+        let valid = TemporalWorldQuery {
+            tick: Some(8),
+            window_start_tick: Some(1),
+            window_end_tick: Some(9),
+        };
+        assert!(valid.validate().is_ok());
+    }
+
+    #[test]
+    fn get_world_snapshot_with_tick_filters_by_time_window() {
+        let mut world = example_world_snapshot();
+        world.entities.push(make_time_windowed_sphere(
+            "sphere-temporal-future-001",
+            "sphere-world-001",
+            10,
+            None,
+        ));
+        world.entities.push(make_time_windowed_sphere(
+            "sphere-temporal-expired-001",
+            "sphere-world-001",
+            0,
+            Some(3),
+        ));
+
+        let repository = WorldRepository::new(world);
+        let snapshot = repository
+            .get_world_snapshot_with_query(
+                "world-main",
+                None,
+                Some(TemporalWorldQuery {
+                    tick: Some(5),
+                    window_start_tick: None,
+                    window_end_tick: None,
+                }),
+            )
+            .expect("snapshot should be present");
+
+        assert!(snapshot
+            .entities
+            .iter()
+            .any(|entity| entity.id == "sphere-building-001"));
+        assert!(!snapshot
+            .entities
+            .iter()
+            .any(|entity| entity.id == "sphere-temporal-future-001"));
+        assert!(!snapshot
+            .entities
+            .iter()
+            .any(|entity| entity.id == "sphere-temporal-expired-001"));
+    }
+
+    #[test]
+    fn get_world_snapshot_with_window_filters_by_overlap_and_parent_visibility() {
+        let mut world = example_world_snapshot();
+        world.entities.push(make_time_windowed_sphere(
+            "sphere-window-overlap-001",
+            "sphere-world-001",
+            3,
+            Some(9),
+        ));
+        world.entities.push(make_time_windowed_sphere(
+            "sphere-window-outside-001",
+            "sphere-world-001",
+            10,
+            Some(14),
+        ));
+
+        let hidden_parent = make_time_windowed_sphere(
+            "sphere-window-parent-hidden-001",
+            "sphere-world-001",
+            20,
+            None,
+        );
+        let hidden_child = make_time_windowed_sphere(
+            "sphere-window-child-should-hide-001",
+            &hidden_parent.id,
+            0,
+            None,
+        );
+        world.entities.push(hidden_parent);
+        world.entities.push(hidden_child);
+
+        let repository = WorldRepository::new(world);
+        let snapshot = repository
+            .get_world_snapshot_with_query(
+                "world-main",
+                None,
+                Some(TemporalWorldQuery {
+                    tick: None,
+                    window_start_tick: Some(4),
+                    window_end_tick: Some(8),
+                }),
+            )
+            .expect("snapshot should be present");
+
+        assert!(snapshot
+            .entities
+            .iter()
+            .any(|entity| entity.id == "sphere-window-overlap-001"));
+        assert!(!snapshot
+            .entities
+            .iter()
+            .any(|entity| entity.id == "sphere-window-outside-001"));
+        assert!(!snapshot
+            .entities
+            .iter()
+            .any(|entity| entity.id == "sphere-window-parent-hidden-001"));
+        assert!(!snapshot
+            .entities
+            .iter()
+            .any(|entity| entity.id == "sphere-window-child-should-hide-001"));
     }
 
     #[test]

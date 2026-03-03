@@ -85,6 +85,12 @@ export interface LoadedWorld {
   tick: number;
 }
 
+export interface TemporalWorldQuery {
+  tick?: number;
+  windowStartTick?: number;
+  windowEndTick?: number | null;
+}
+
 export type WorldCommitOperation =
   | {
       type: "create";
@@ -222,12 +228,179 @@ function toBackendCommitOperation(operation: WorldCommitOperation): BackendCommi
   }
 }
 
+function toNonNegativeInteger(value: number, label: string): number {
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative integer`);
+  }
+  return value;
+}
+
+function appendTemporalWorldQuery(
+  searchParams: URLSearchParams,
+  temporalQuery?: TemporalWorldQuery,
+): void {
+  if (!temporalQuery) {
+    return;
+  }
+
+  let parsedTick: number | null = null;
+  if (temporalQuery.tick !== undefined) {
+    parsedTick = toNonNegativeInteger(temporalQuery.tick, "tick");
+    searchParams.set(
+      "tick",
+      String(parsedTick),
+    );
+  }
+
+  let parsedWindowStartTick: number | null = null;
+  if (temporalQuery.windowStartTick !== undefined) {
+    parsedWindowStartTick = toNonNegativeInteger(
+      temporalQuery.windowStartTick,
+      "windowStartTick",
+    );
+    searchParams.set("window_start_tick", String(parsedWindowStartTick));
+  }
+
+  if (temporalQuery.windowEndTick !== undefined) {
+    if (parsedWindowStartTick === null) {
+      throw new Error("windowEndTick requires windowStartTick");
+    }
+
+    if (temporalQuery.windowEndTick === null) {
+      return;
+    }
+
+    const parsedWindowEndTick = toNonNegativeInteger(
+      temporalQuery.windowEndTick,
+      "windowEndTick",
+    );
+    if (parsedWindowEndTick < parsedWindowStartTick) {
+      throw new Error("windowEndTick must be >= windowStartTick");
+    }
+
+    searchParams.set("window_end_tick", String(parsedWindowEndTick));
+  }
+
+  if (parsedTick !== null) {
+    if (parsedWindowStartTick !== null && parsedTick < parsedWindowStartTick) {
+      throw new Error("tick must be >= windowStartTick");
+    }
+
+    if (
+      temporalQuery.windowEndTick !== undefined &&
+      temporalQuery.windowEndTick !== null &&
+      parsedTick > temporalQuery.windowEndTick
+    ) {
+      throw new Error("tick must be <= windowEndTick");
+    }
+  }
+}
+
+function isEntityActiveAtTick(entity: SphereEntity, tick: number): boolean {
+  if (tick < entity.timeWindow.start) {
+    return false;
+  }
+
+  return entity.timeWindow.end === null || tick <= entity.timeWindow.end;
+}
+
+function doesEntityOverlapWindow(
+  entity: SphereEntity,
+  windowStartTick: number,
+  windowEndTick: number | null,
+): boolean {
+  if (windowEndTick !== null && entity.timeWindow.start > windowEndTick) {
+    return false;
+  }
+
+  return entity.timeWindow.end === null || entity.timeWindow.end >= windowStartTick;
+}
+
+function isEntityVisibleForTemporalQuery(
+  entity: SphereEntity,
+  temporalQuery: TemporalWorldQuery,
+): boolean {
+  if (
+    temporalQuery.tick !== undefined &&
+    !isEntityActiveAtTick(entity, temporalQuery.tick)
+  ) {
+    return false;
+  }
+
+  if (
+    temporalQuery.windowStartTick !== undefined &&
+    !doesEntityOverlapWindow(
+      entity,
+      temporalQuery.windowStartTick,
+      temporalQuery.windowEndTick ?? null,
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function filterLoadedWorldByTemporalQuery(
+  loaded: LoadedWorld,
+  temporalQuery?: TemporalWorldQuery,
+): LoadedWorld {
+  if (
+    !temporalQuery ||
+    (temporalQuery.tick === undefined &&
+      temporalQuery.windowStartTick === undefined &&
+      temporalQuery.windowEndTick === undefined)
+  ) {
+    return loaded;
+  }
+
+  const includedIds = new Set<string>([loaded.world.parent.id]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const entity of loaded.world.children) {
+      if (includedIds.has(entity.id)) {
+        continue;
+      }
+
+      const parentId = entity.parentId;
+      if (!parentId || !includedIds.has(parentId)) {
+        continue;
+      }
+
+      if (!isEntityVisibleForTemporalQuery(entity, temporalQuery)) {
+        continue;
+      }
+
+      includedIds.add(entity.id);
+      changed = true;
+    }
+  }
+
+  return {
+    tick: loaded.tick,
+    world: {
+      parent: loaded.world.parent,
+      children: loaded.world.children.filter((entity) => includedIds.has(entity.id)),
+    },
+  };
+}
+
 export async function fetchWorldSeed(
   worldId: string,
   userId?: string,
+  temporalQuery?: TemporalWorldQuery,
 ): Promise<LoadedWorld> {
-  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
-  const response = await fetch(`/api/v1/world/${encodeURIComponent(worldId)}${query}`);
+  const searchParams = new URLSearchParams();
+  if (userId) {
+    searchParams.set("user_id", userId);
+  }
+  appendTemporalWorldQuery(searchParams, temporalQuery);
+
+  const query = searchParams.toString();
+  const response = await fetch(
+    `/api/v1/world/${encodeURIComponent(worldId)}${query.length > 0 ? `?${query}` : ""}`,
+  );
   if (!response.ok) {
     throw new Error(
       `Failed to fetch world snapshot (${response.status} ${response.statusText})`,
@@ -235,7 +408,8 @@ export async function fetchWorldSeed(
   }
 
   const payload = (await response.json()) as BackendWorldSnapshot;
-  return parseLoadedWorldSnapshot(payload);
+  const loaded = parseLoadedWorldSnapshot(payload);
+  return filterLoadedWorldByTemporalQuery(loaded, temporalQuery);
 }
 
 export async function fetchAvailableWorldIds(): Promise<string[]> {

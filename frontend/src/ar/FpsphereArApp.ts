@@ -14,6 +14,10 @@ import {
   type AvatarId,
   type AvatarRenderHandle,
 } from "../game/avatarRenderAdapter";
+import {
+  planRemoteAvatarSnapshot,
+  planRemoteAvatarWorldSwitch,
+} from "../game/remoteAvatarLifecycle";
 import { LocalWorldStore, type WorldStoreSnapshot } from "../game/worldStore";
 import {
   getTemplateRootSphereId,
@@ -808,21 +812,17 @@ export class FpsphereArApp {
       return;
     }
 
-    const nextIds = new Set<string>();
-    for (const remotePlayer of snapshot.players) {
-      if (remotePlayer.player_id === this.localPlayerId) {
-        continue;
-      }
-
-      nextIds.add(remotePlayer.player_id);
+    const plan = planRemoteAvatarSnapshot(
+      snapshot.players,
+      this.localPlayerId,
+      this.remotePlayers.keys(),
+    );
+    for (const remotePlayer of plan.upsertPlayers) {
       this.remotePlayers.set(remotePlayer.player_id, remotePlayer);
       this.upsertRemotePlayerMesh(remotePlayer);
     }
 
-    for (const existingId of [...this.remotePlayers.keys()]) {
-      if (nextIds.has(existingId)) {
-        continue;
-      }
+    for (const existingId of plan.removePlayerIds) {
       this.remotePlayers.delete(existingId);
       this.removeRemotePlayerMesh(existingId);
     }
@@ -890,7 +890,7 @@ export class FpsphereArApp {
   }
 
   private clearRemotePlayers(): void {
-    for (const playerId of [...this.remotePlayerAvatars.keys()]) {
+    for (const playerId of planRemoteAvatarWorldSwitch(this.remotePlayerAvatars.keys())) {
       this.removeRemotePlayerMesh(playerId);
     }
     this.remotePlayers.clear();

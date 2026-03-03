@@ -7,6 +7,16 @@ export interface TimeWindow {
   end: number | null;
 }
 
+export interface TemporalQueryWindow {
+  startTick: number;
+  endTick: number | null;
+}
+
+export interface TemporalQuery {
+  tick?: number;
+  window?: TemporalQueryWindow;
+}
+
 export interface SphereEntity {
   id: string;
   parentId: string | null;

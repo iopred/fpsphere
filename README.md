@@ -114,6 +114,10 @@ Current implementation includes:
   - Simplified payloads:
     - commit success responses now include `commit_id`, `saved_to`, `reason`, and `world`.
     - multiplayer state snapshots include `world_id`, `server_tick`, and per-player `player_id`, `position_3d`, `yaw`, `pitch`, `avatar_id`, `last_processed_input_tick`.
+  - Temporal world query contract added for `GET /api/v1/world/:world_id`:
+    - accepts optional `tick`, `window_start_tick`, and `window_end_tick` parameters.
+    - enforces temporal query validation (`window_end_tick` requires start and must be `>=` start).
+    - applies `time_window` filtering for temporal fetches while preserving parent-child consistency.
   - Backend delete semantics now reject deleting non-leaf spheres (prevents orphaned parent references).
   - Sprint 1 closeout artifact with acceptance evidence: [docs/sprint-1-closeout.md](docs/sprint-1-closeout.md).
   - Sprint 2 closeout artifact with authoritative movement acceptance evidence: [docs/sprint-2-closeout.md](docs/sprint-2-closeout.md).
