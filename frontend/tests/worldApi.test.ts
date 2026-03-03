@@ -156,6 +156,70 @@ describe("worldApi", () => {
     expect(childIds).not.toContain("sphere-temporal-future-001");
   });
 
+  it("deterministically filters nested temporal entities across repeated loads", async () => {
+    const payload = backendSnapshotPayload();
+    payload.entities.push(
+      {
+        id: "sphere-temporal-child-before-parent-001",
+        parent_id: "sphere-temporal-parent-visible-001",
+        radius: 1.5,
+        position_3d: [6, 1, 1],
+        dimensions: { money: 0.1 },
+        time_window: { start_tick: 4, end_tick: 9 },
+        tags: ["windowed", "child"],
+      },
+      {
+        id: "sphere-temporal-parent-hidden-001",
+        parent_id: "sphere-world-001",
+        radius: 2,
+        position_3d: [7, 1, 1],
+        dimensions: { money: 0.1 },
+        time_window: { start_tick: 20, end_tick: null },
+        tags: ["future-parent"],
+      },
+      {
+        id: "sphere-temporal-child-hidden-parent-001",
+        parent_id: "sphere-temporal-parent-hidden-001",
+        radius: 1,
+        position_3d: [7, 1, 2],
+        dimensions: { money: 0.1 },
+        time_window: { start_tick: 0, end_tick: null },
+        tags: ["hidden-by-parent"],
+      },
+      {
+        id: "sphere-temporal-parent-visible-001",
+        parent_id: "sphere-world-001",
+        radius: 2.5,
+        position_3d: [6, 1, 2],
+        dimensions: { money: 0.1 },
+        time_window: { start_tick: 3, end_tick: 9 },
+        tags: ["windowed", "parent"],
+      },
+    );
+
+    const fetchMock = vi.fn(async () => {
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    globalThis.fetch = fetchMock as typeof globalThis.fetch;
+
+    const query = { tick: 6, windowStartTick: 4, windowEndTick: 8 } as const;
+    const firstLoaded = await fetchWorldSeed("world-main", "user-1", query);
+    const secondLoaded = await fetchWorldSeed("world-main", "user-1", query);
+
+    const firstIds = firstLoaded.world.children.map((entity) => entity.id);
+    const secondIds = secondLoaded.world.children.map((entity) => entity.id);
+
+    expect(firstIds).toEqual(secondIds);
+    expect(firstIds).toContain("sphere-temporal-parent-visible-001");
+    expect(firstIds).toContain("sphere-temporal-child-before-parent-001");
+    expect(firstIds).not.toContain("sphere-temporal-parent-hidden-001");
+    expect(firstIds).not.toContain("sphere-temporal-child-hidden-parent-001");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("sends commit payload and maps commit response", async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));

@@ -118,6 +118,12 @@ Current implementation includes:
     - accepts optional `tick`, `window_start_tick`, and `window_end_tick` parameters.
     - enforces temporal query validation (`window_end_tick` requires start and must be `>=` start).
     - applies `time_window` filtering for temporal fetches while preserving parent-child consistency.
+  - Template placement playback animation:
+    - editor-created template host spheres (`world_template > 0`) now play a time-window-driven creation animation.
+    - playback reads `time_window.start_tick` and uses a short intro/overshoot/settle scale curve for editor feedback.
+  - Deterministic temporal regression coverage:
+    - backend tests verify stable temporal snapshot selection across repeated identical queries.
+    - frontend tests verify deterministic temporal filtering and playback progression for repeated tick sampling.
   - Backend delete semantics now reject deleting non-leaf spheres (prevents orphaned parent references).
   - Sprint 1 closeout artifact with acceptance evidence: [docs/sprint-1-closeout.md](docs/sprint-1-closeout.md).
   - Sprint 2 closeout artifact with authoritative movement acceptance evidence: [docs/sprint-2-closeout.md](docs/sprint-2-closeout.md).

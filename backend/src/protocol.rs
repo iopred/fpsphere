@@ -1182,6 +1182,134 @@ mod tests {
     }
 
     #[test]
+    fn temporal_query_is_deterministic_with_unordered_parent_child_entities() {
+        let mut world = example_world_snapshot();
+        let visible_child = make_time_windowed_sphere(
+            "sphere-temporal-child-before-parent-001",
+            "sphere-temporal-parent-visible-001",
+            4,
+            Some(9),
+        );
+        let visible_parent = make_time_windowed_sphere(
+            "sphere-temporal-parent-visible-001",
+            "sphere-world-001",
+            3,
+            Some(9),
+        );
+        let hidden_parent = make_time_windowed_sphere(
+            "sphere-temporal-parent-hidden-001",
+            "sphere-world-001",
+            20,
+            None,
+        );
+        let hidden_child = make_time_windowed_sphere(
+            "sphere-temporal-child-hidden-parent-001",
+            "sphere-temporal-parent-hidden-001",
+            0,
+            None,
+        );
+
+        // Purposefully insert child before parent to prove filtering is order-stable.
+        world.entities.push(visible_child);
+        world.entities.push(hidden_parent);
+        world.entities.push(hidden_child);
+        world.entities.push(visible_parent);
+
+        let repository = WorldRepository::new(world);
+        let query = TemporalWorldQuery {
+            tick: Some(6),
+            window_start_tick: Some(4),
+            window_end_tick: Some(8),
+        };
+
+        let snapshot_a = repository
+            .get_world_snapshot_with_query("world-main", None, Some(query))
+            .expect("snapshot should be present");
+        let snapshot_b = repository
+            .get_world_snapshot_with_query("world-main", None, Some(query))
+            .expect("snapshot should be present");
+
+        let ids_a = snapshot_a
+            .entities
+            .iter()
+            .map(|entity| entity.id.clone())
+            .collect::<Vec<_>>();
+        let ids_b = snapshot_b
+            .entities
+            .iter()
+            .map(|entity| entity.id.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids_a, ids_b);
+        assert!(ids_a
+            .iter()
+            .any(|entity_id| entity_id == "sphere-temporal-parent-visible-001"));
+        assert!(ids_a
+            .iter()
+            .any(|entity_id| entity_id == "sphere-temporal-child-before-parent-001"));
+        assert!(!ids_a
+            .iter()
+            .any(|entity_id| entity_id == "sphere-temporal-parent-hidden-001"));
+        assert!(!ids_a
+            .iter()
+            .any(|entity_id| entity_id == "sphere-temporal-child-hidden-parent-001"));
+    }
+
+    #[test]
+    fn temporal_query_tick_only_matches_tick_with_enclosing_window() {
+        let mut world = example_world_snapshot();
+        world.entities.push(make_time_windowed_sphere(
+            "sphere-temporal-windowed-002",
+            "sphere-world-001",
+            2,
+            Some(12),
+        ));
+        world.entities.push(make_time_windowed_sphere(
+            "sphere-temporal-future-002",
+            "sphere-world-001",
+            20,
+            None,
+        ));
+
+        let repository = WorldRepository::new(world);
+        let tick_only = repository
+            .get_world_snapshot_with_query(
+                "world-main",
+                None,
+                Some(TemporalWorldQuery {
+                    tick: Some(6),
+                    window_start_tick: None,
+                    window_end_tick: None,
+                }),
+            )
+            .expect("tick-only snapshot should be present");
+        let tick_with_window = repository
+            .get_world_snapshot_with_query(
+                "world-main",
+                None,
+                Some(TemporalWorldQuery {
+                    tick: Some(6),
+                    window_start_tick: Some(4),
+                    window_end_tick: Some(8),
+                }),
+            )
+            .expect("tick+window snapshot should be present");
+
+        let tick_only_ids = tick_only
+            .entities
+            .iter()
+            .map(|entity| entity.id.clone())
+            .collect::<Vec<_>>();
+        let tick_with_window_ids = tick_with_window
+            .entities
+            .iter()
+            .map(|entity| entity.id.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(tick_only_ids, tick_with_window_ids);
+    }
+
+    #[test]
     fn commit_compacts_legacy_template_descendants_when_shared_definition_exists() {
         let mut repository = WorldRepository::new(example_world_snapshot());
 

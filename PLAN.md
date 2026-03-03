@@ -465,8 +465,8 @@ Goal: use `time_window` for deterministic temporal querying and editor feedback 
 
 - [x] `S4-T1` Define temporal query contract (`tick`, window filtering semantics).
 - [x] `S4-T2` Implement runtime/store filtering by `time_window`.
-- [ ] `S4-T3` Add template-placement creation playback animation driven by `time_window`.
-- [ ] `S4-T4` Add temporal regression tests for deterministic query/playback behavior.
+- [x] `S4-T3` Add template-placement creation playback animation driven by `time_window`.
+- [x] `S4-T4` Add temporal regression tests for deterministic query/playback behavior.
 
 ### 13.3 Sprint 5 Plan (M5 AOI + Delta Networking)
 

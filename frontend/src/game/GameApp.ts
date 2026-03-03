@@ -50,6 +50,10 @@ import {
   planRemoteAvatarSnapshot,
   planRemoteAvatarWorldSwitch,
 } from "./remoteAvatarLifecycle";
+import {
+  templatePlacementPlaybackProgress,
+  templatePlacementPlaybackScale,
+} from "./templatePlacementPlayback";
 
 const FIXED_STEP_SECONDS = 1 / 60;
 const MOVE_SPEED = 18;
@@ -107,6 +111,10 @@ interface RemoteAvatarRenderInstance {
   handle: AvatarRenderHandle;
 }
 
+interface TemplatePlacementPlaybackState {
+  startTick: number;
+}
+
 const tempForward = new THREE.Vector3();
 const tempOffset = new THREE.Vector3();
 const tempDragTarget = new THREE.Vector3();
@@ -118,6 +126,8 @@ const REMOTE_INTERPOLATION_SMOOTH_TIME_SECONDS = 0.085;
 const REMOTE_INTERPOLATION_SNAP_DISTANCE = 5;
 const REMOTE_INTERPOLATION_SNAP_ANGLE_RADIANS = Math.PI * 0.75;
 const REMOTE_INTERPOLATION_MAX_FRAME_SECONDS = 0.1;
+const TEMPLATE_PLACEMENT_PLAYBACK_DURATION_TICKS = 42;
+const TEMPLATE_PLACEMENT_PLAYBACK_MAX_AGE_TICKS = 180;
 const TWO_PI = Math.PI * 2;
 
 export class GameApp {
@@ -208,6 +218,10 @@ export class GameApp {
   private lastNetworkSendTick = 0;
   private nextInputSequence = 0;
   private readonly pendingPredictedInputs = new Map<number, PredictedInputState>();
+  private readonly templatePlacementPlaybackById = new Map<
+    string,
+    TemplatePlacementPlaybackState
+  >();
   private lastAckedInputSequence = 0;
   private lastSnapshotServerTick = 0;
   private lastReconciliationError = 0;
@@ -1643,6 +1657,7 @@ export class GameApp {
         );
         this.obstacleBodiesById.set(entity.id, body);
         this.addObstacleMesh(body, colorChannels);
+        this.maybeStartTemplatePlacementPlayback(entity, body);
         continue;
       }
 
@@ -2104,6 +2119,7 @@ export class GameApp {
 
   private removeObstacleById(obstacleId: string): void {
     this.obstacleBodiesById.delete(obstacleId);
+    this.templatePlacementPlaybackById.delete(obstacleId);
 
     const mesh = this.obstacleMeshes.get(obstacleId);
     if (mesh) {
@@ -2374,10 +2390,83 @@ export class GameApp {
     }
 
     this.updateRemotePlayerInterpolation(frameSeconds);
+    this.updateTemplatePlacementPlayback();
     this.syncCamera();
     this.updateHud();
     this.renderer.render(this.scene, this.camera);
   };
+
+  private maybeStartTemplatePlacementPlayback(
+    entity: SphereEntity,
+    obstacle: ObstacleBody,
+  ): void {
+    if (this.templatePlacementPlaybackById.has(entity.id)) {
+      return;
+    }
+    if (
+      !obstacle.portalHost ||
+      obstacle.instancedSubworld ||
+      !entity.tags.includes("world-instance") ||
+      !entity.tags.includes("user-created") ||
+      this.isTemplateRootSphere(entity)
+    ) {
+      return;
+    }
+
+    const startTick = Math.max(0, Math.trunc(entity.timeWindow.start));
+    const progress = templatePlacementPlaybackProgress({
+      currentTick: this.tick,
+      startTick,
+      durationTicks: TEMPLATE_PLACEMENT_PLAYBACK_DURATION_TICKS,
+      maxAgeTicks: TEMPLATE_PLACEMENT_PLAYBACK_MAX_AGE_TICKS,
+    });
+    if (progress === null) {
+      return;
+    }
+
+    this.templatePlacementPlaybackById.set(entity.id, { startTick });
+  }
+
+  private updateTemplatePlacementPlayback(): void {
+    if (this.templatePlacementPlaybackById.size === 0) {
+      return;
+    }
+
+    for (const [obstacleId, playbackState] of this.templatePlacementPlaybackById) {
+      const obstacle = this.obstacleBodiesById.get(obstacleId);
+      const mesh = this.obstacleMeshes.get(obstacleId);
+      if (!obstacle || !mesh) {
+        this.templatePlacementPlaybackById.delete(obstacleId);
+        continue;
+      }
+
+      const progress = templatePlacementPlaybackProgress({
+        currentTick: this.tick,
+        startTick: playbackState.startTick,
+        durationTicks: TEMPLATE_PLACEMENT_PLAYBACK_DURATION_TICKS,
+        maxAgeTicks: TEMPLATE_PLACEMENT_PLAYBACK_MAX_AGE_TICKS,
+      });
+      if (progress === null) {
+        mesh.scale.setScalar(obstacle.radius);
+        this.templatePlacementPlaybackById.delete(obstacleId);
+        continue;
+      }
+
+      const scale = obstacle.radius * templatePlacementPlaybackScale(progress);
+      mesh.scale.setScalar(scale);
+      if (mesh.material instanceof THREE.MeshStandardMaterial && obstacle.portalHost) {
+        mesh.material.opacity = THREE.MathUtils.lerp(0.05, 0.24, progress);
+      }
+
+      if (progress >= 1) {
+        mesh.scale.setScalar(obstacle.radius);
+        if (mesh.material instanceof THREE.MeshStandardMaterial && obstacle.portalHost) {
+          mesh.material.opacity = 0.24;
+        }
+        this.templatePlacementPlaybackById.delete(obstacleId);
+      }
+    }
+  }
 
   private sendLocalPlayerUpdate(options: { recordPrediction: boolean } = { recordPrediction: true }): void {
     const orientation = this.controller.getOrientation();
