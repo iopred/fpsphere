@@ -124,6 +124,12 @@ Current implementation includes:
   - Deterministic temporal regression coverage:
     - backend tests verify stable temporal snapshot selection across repeated identical queries.
     - frontend tests verify deterministic temporal filtering and playback progression for repeated tick sampling.
+  - AOI policy primitives (Sprint 5 groundwork):
+    - backend defines deterministic AOI partition/query utilities for players and world entities.
+    - default AOI policy includes domain-specific radii/limits and stable distance+id ordering.
+  - AOI multiplayer filtering:
+    - websocket state snapshots are now filtered per observer by AOI membership instead of full-world player fanout.
+    - observer inclusion is guaranteed; tie-break ordering remains deterministic.
   - Backend delete semantics now reject deleting non-leaf spheres (prevents orphaned parent references).
   - Sprint 1 closeout artifact with acceptance evidence: [docs/sprint-1-closeout.md](docs/sprint-1-closeout.md).
   - Sprint 2 closeout artifact with authoritative movement acceptance evidence: [docs/sprint-2-closeout.md](docs/sprint-2-closeout.md).

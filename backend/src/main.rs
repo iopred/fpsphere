@@ -1,3 +1,4 @@
+mod aoi;
 mod multiplayer;
 mod protocol;
 
@@ -7,8 +8,10 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use aoi::AoiPolicy;
 use multiplayer::{
-    ClientMultiplayerMessage, MultiplayerHub, PlayerInputEnqueueResult, ServerMultiplayerMessage,
+    filter_snapshot_players_for_observer, ClientMultiplayerMessage, MultiplayerHub,
+    PlayerInputEnqueueResult, ServerMultiplayerMessage,
 };
 use protocol::{
     example_world_snapshot, CommitFailure, CommitRequest, CommitResponse, CommitTarget,
@@ -378,10 +381,15 @@ async fn handle_ws_connection(
                 match outbound {
                     Ok(ServerMultiplayerMessage::StateSnapshot { world_id: snapshot_world_id, server_tick, players }) => {
                         if snapshot_world_id == world_id {
+                            let filtered_players = filter_snapshot_players_for_observer(
+                                &players,
+                                player.player_id.as_str(),
+                                AoiPolicy::default(),
+                            );
                             let snapshot = ServerMultiplayerMessage::StateSnapshot {
                                 world_id: snapshot_world_id,
                                 server_tick,
-                                players,
+                                players: filtered_players,
                             };
                             if send_ws_message(&mut socket, &snapshot).await.is_err() {
                                 break;

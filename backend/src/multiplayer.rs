@@ -1,6 +1,7 @@
+use crate::aoi::{select_ids_in_query, AoiDomain, AoiPolicy};
 use crate::protocol::{CommitTarget, WorldSnapshot};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
@@ -57,6 +58,44 @@ pub struct MultiplayerPlayerSnapshot {
     pub pitch: f32,
     pub avatar_id: String,
     pub last_processed_input_tick: u64,
+}
+
+pub fn filter_snapshot_players_for_observer(
+    players: &[MultiplayerPlayerSnapshot],
+    observer_player_id: &str,
+    policy: AoiPolicy,
+) -> Vec<MultiplayerPlayerSnapshot> {
+    if players.len() <= 1 {
+        return players.to_vec();
+    }
+
+    let Some(observer) = players
+        .iter()
+        .find(|player| player.player_id == observer_player_id)
+    else {
+        // During connect/disconnect churn, fail open rather than dropping entities.
+        return players.to_vec();
+    };
+
+    let query = policy.query_for(AoiDomain::Players, observer.position_3d);
+    let mut included_ids = select_ids_in_query(
+        players.iter(),
+        query,
+        None,
+        |player| player.position_3d,
+        |player| player.player_id.as_str(),
+    )
+    .into_iter()
+    .collect::<HashSet<_>>();
+    included_ids.insert(observer_player_id.to_string());
+
+    let mut filtered = players
+        .iter()
+        .filter(|player| included_ids.contains(&player.player_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    filtered.sort_by(|a, b| a.player_id.cmp(&b.player_id));
+    filtered
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -481,7 +520,11 @@ impl MultiplayerHub {
 
 #[cfg(test)]
 mod tests {
-    use super::{MultiplayerHub, PlayerInputEnqueueResult, ServerMultiplayerMessage};
+    use super::{
+        filter_snapshot_players_for_observer, MultiplayerHub, MultiplayerPlayerSnapshot,
+        PlayerInputEnqueueResult, ServerMultiplayerMessage,
+    };
+    use crate::aoi::AoiPolicy;
     use crate::protocol::{example_world_snapshot, CommitTarget};
     use std::collections::BTreeMap;
     use tokio::time::{timeout, Duration};
@@ -1075,5 +1118,87 @@ mod tests {
             }
             _ => panic!("unexpected message type"),
         }
+    }
+
+    #[test]
+    fn filter_snapshot_players_for_observer_applies_aoi_radius() {
+        let players = vec![
+            MultiplayerPlayerSnapshot {
+                player_id: "player-observer".to_string(),
+                position_3d: [0.0, 0.0, 0.0],
+                yaw: 0.0,
+                pitch: 0.0,
+                avatar_id: "duck".to_string(),
+                last_processed_input_tick: 1,
+            },
+            MultiplayerPlayerSnapshot {
+                player_id: "player-near".to_string(),
+                position_3d: [10.0, 0.0, 0.0],
+                yaw: 0.0,
+                pitch: 0.0,
+                avatar_id: "human".to_string(),
+                last_processed_input_tick: 1,
+            },
+            MultiplayerPlayerSnapshot {
+                player_id: "player-far".to_string(),
+                position_3d: [100.0, 0.0, 0.0],
+                yaw: 0.0,
+                pitch: 0.0,
+                avatar_id: "duck".to_string(),
+                last_processed_input_tick: 1,
+            },
+        ];
+
+        let filtered =
+            filter_snapshot_players_for_observer(&players, "player-observer", AoiPolicy::default());
+        let ids = filtered
+            .iter()
+            .map(|player| player.player_id.clone())
+            .collect::<Vec<_>>();
+
+        assert!(ids.iter().any(|id| id == "player-observer"));
+        assert!(ids.iter().any(|id| id == "player-near"));
+        assert!(!ids.iter().any(|id| id == "player-far"));
+    }
+
+    #[test]
+    fn filter_snapshot_players_for_observer_is_deterministic_and_fails_open_when_missing() {
+        let players = vec![
+            MultiplayerPlayerSnapshot {
+                player_id: "a".to_string(),
+                position_3d: [0.0, 0.0, 0.0],
+                yaw: 0.0,
+                pitch: 0.0,
+                avatar_id: "duck".to_string(),
+                last_processed_input_tick: 1,
+            },
+            MultiplayerPlayerSnapshot {
+                player_id: "b".to_string(),
+                position_3d: [12.0, 0.0, 0.0],
+                yaw: 0.0,
+                pitch: 0.0,
+                avatar_id: "duck".to_string(),
+                last_processed_input_tick: 1,
+            },
+            MultiplayerPlayerSnapshot {
+                player_id: "c".to_string(),
+                position_3d: [80.0, 0.0, 0.0],
+                yaw: 0.0,
+                pitch: 0.0,
+                avatar_id: "duck".to_string(),
+                last_processed_input_tick: 1,
+            },
+        ];
+
+        let first = filter_snapshot_players_for_observer(&players, "a", AoiPolicy::default());
+        let second = filter_snapshot_players_for_observer(&players, "a", AoiPolicy::default());
+        assert_eq!(first.len(), second.len());
+        for index in 0..first.len() {
+            assert_eq!(first[index].player_id, second[index].player_id);
+        }
+
+        let missing =
+            filter_snapshot_players_for_observer(&players, "missing-player", AoiPolicy::default());
+        assert_eq!(missing.len(), players.len());
     }
 }
