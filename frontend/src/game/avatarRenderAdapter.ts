@@ -92,6 +92,7 @@ const DEFAULT_HUMAN_AVATAR_LAYOUT: HumanAvatarLayout = {
   directionYOffset: 0.6,
   directionZOffset: -0.52,
 };
+const AVATAR_TARGET_BOTTOM_Y = -1.2;
 
 export function availableAvatarIds(): AvatarId[] {
   return [...AVATAR_IDS];
@@ -279,6 +280,16 @@ function resolveAvatarStyle(
   };
 }
 
+function resolveGroundingOffsetY(root: THREE.Object3D): number {
+  root.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(root);
+  if (!Number.isFinite(bounds.min.y)) {
+    return 0;
+  }
+
+  return AVATAR_TARGET_BOTTOM_Y - bounds.min.y;
+}
+
 function createDuckAvatarMeshes(
   style: AvatarRenderStyle,
   layout: DuckAvatarLayout,
@@ -446,11 +457,12 @@ export function createRemoteAvatarHandle(
     });
     return createDuckAvatarMeshes(style, layout);
   })();
+  const groundingOffsetY = resolveGroundingOffsetY(meshSet.root);
 
   return {
     object3d: meshSet.root,
     applyPose: (x, y, z, yaw, pitch) => {
-      meshSet.root.position.set(x, y, z);
+      meshSet.root.position.set(x, y + groundingOffsetY, z);
       meshSet.root.rotation.y = yaw;
       meshSet.root.rotation.x = pitch;
     },

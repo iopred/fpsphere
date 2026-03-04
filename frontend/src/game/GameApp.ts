@@ -2776,12 +2776,12 @@ export class GameApp {
   private updateHintText(): void {
     if (this.editorMode) {
       this.hintNode.textContent =
-        "EDIT MODE | ~ exit editor | C create | E select | F enter selected template / exit | Q deselect | Z delete | wheel resize | hold RMB drag | use Level Select panel";
+        "EDIT MODE | ~ exit editor | C create | E select | F enter selected template / exit | Q deselect | Z delete | wheel resize | hold RMB drag | Cmd/Ctrl+S save";
       return;
     }
 
     this.hintNode.textContent =
-      "Click to lock pointer | WASD + Space | O overlay | ~ editor mode | Cmd/Ctrl+S save";
+      "Click to lock pointer | WASD + Space | ~ editor mode";
   }
 
   private updateHud(): void {
