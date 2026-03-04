@@ -21,14 +21,8 @@ import {
 } from "./subworldTemplates";
 import { buildSeedWorld } from "./worldSeed";
 import {
-  commitWorldChanges,
-  createWorldLevel,
-  deleteWorldLevel,
-  fetchAvailableWorldIds,
-  fetchWorldSeed,
   parseLoadedWorldSnapshot,
   type WorldCommitOperation,
-  WorldCommitError,
 } from "./worldApi";
 import {
   MultiplayerClient,
@@ -48,6 +42,10 @@ import {
 } from "./templatePlacementPlayback";
 import { RemoteAvatarRenderSystem } from "./remoteAvatarRenderSystem";
 import { LocalPredictionReconciler } from "./localPredictionReconciler";
+import {
+  LevelLifecycleController,
+  type WorldSourceState,
+} from "./levelLifecycleController";
 
 const FIXED_STEP_SECONDS = 1 / 60;
 const MOVE_SPEED = 18;
@@ -163,16 +161,8 @@ export class GameApp {
   private dragDistance = CREATE_DISTANCE;
   private createdSphereCount = 0;
   private pendingCommitOperations: WorldCommitOperation[] = [];
-  private saveInFlight = false;
-  private saveMessage = "no pending edits";
-  private backendWorldTick = 0;
   private readonly userId = this.getOrCreateUserId();
-  private currentWorldId = DEFAULT_WORLD_ID;
-  private availableWorldIds = [DEFAULT_WORLD_ID];
-  private loadingWorldId: string | null = null;
-  private levelMutationInFlight = false;
-  private levelSelectMessage: string | null = null;
-  private worldLoadVersion = 0;
+  private readonly levelLifecycleController: LevelLifecycleController;
   private localPlayerId: string | null = null;
   private multiplayerStatus = "disconnected";
   private multiplayerError: string | null = null;
@@ -184,8 +174,31 @@ export class GameApp {
     string,
     TemplatePlacementPlaybackState
   >();
-  private worldSourceState: "seed" | "loading" | "backend" | "backend-user" = "loading";
   private disposed = false;
+
+  private get currentWorldId(): string {
+    return this.levelLifecycleController.worldId;
+  }
+
+  private get availableWorldIds(): string[] {
+    return this.levelLifecycleController.worldIds;
+  }
+
+  private get saveInFlight(): boolean {
+    return this.levelLifecycleController.isSaveInFlight;
+  }
+
+  private get saveMessage(): string {
+    return this.levelLifecycleController.currentSaveMessage;
+  }
+
+  private get backendWorldTick(): number {
+    return this.levelLifecycleController.currentBackendWorldTick;
+  }
+
+  private get worldSourceState(): WorldSourceState {
+    return this.levelLifecycleController.currentWorldSourceState;
+  }
 
   constructor(private readonly mountNode: HTMLDivElement) {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -394,10 +407,44 @@ export class GameApp {
     this.editorPanelsNode.appendChild(this.levelSelectNode);
 
     const queryWorldId = new URLSearchParams(window.location.search).get("world");
-    if (queryWorldId && queryWorldId.trim().length > 0) {
-      this.currentWorldId = queryWorldId.trim();
-      this.availableWorldIds = [this.currentWorldId];
-    }
+    const initialWorldId =
+      queryWorldId && queryWorldId.trim().length > 0 ? queryWorldId.trim() : undefined;
+
+    this.levelLifecycleController = new LevelLifecycleController({
+      defaultWorldId: DEFAULT_WORLD_ID,
+      initialWorldId,
+      ui: {
+        levelSelectNode: this.levelSelectNode,
+        levelSelectStatusNode: this.levelSelectStatusNode,
+        levelSelectDropdown: this.levelSelectDropdown,
+        levelRemoveButton: this.levelRemoveButton,
+        levelCreateInput: this.levelCreateInput,
+        levelCreateButton: this.levelCreateButton,
+        levelSelectRefreshButton: this.levelSelectRefreshButton,
+      },
+      callbacks: {
+        userId: this.userId,
+        isDisposed: () => this.disposed,
+        isEditorMode: () => this.editorMode,
+        getPendingCommitOperations: () => this.pendingCommitOperations,
+        replacePendingCommitOperations: (operations) => {
+          this.pendingCommitOperations = operations;
+        },
+        stopDraggingSphere: () => this.stopDraggingSphere(),
+        deselectSphere: () => {
+          this.worldStore.apply({ type: "deselectSphere" });
+        },
+        updateWorldQueryParam: (worldId) => this.updateWorldQueryParam(worldId),
+        connectMultiplayer: (worldId) => this.connectMultiplayer(worldId),
+        movePlayerToCurrentWorld: () => this.movePlayerToCurrentWorld(),
+        hydrateWorld: (world) =>
+          this.worldStore.apply({
+            type: "hydrateWorld",
+            world,
+          }),
+        getTemplateFocusSphereId: () => this.getMultiplayerTemplateFocusSphereId(),
+      },
+    });
 
     this.controller = new FpsController(this.renderer.domElement);
 
@@ -526,151 +573,21 @@ export class GameApp {
   };
 
   private async initializeLevelSelection(): Promise<void> {
-    await this.refreshAvailableWorldIds({ preserveCurrentWorldId: true });
-    await this.selectWorldLevel(this.currentWorldId, true);
-  }
-
-  private normalizeWorldIds(worldIds: string[]): string[] {
-    const normalizedWorldIds: string[] = [];
-    const seenWorldIds = new Set<string>();
-
-    for (const value of worldIds) {
-      const worldId = value.trim();
-      if (worldId.length === 0 || seenWorldIds.has(worldId)) {
-        continue;
-      }
-
-      seenWorldIds.add(worldId);
-      normalizedWorldIds.push(worldId);
-    }
-
-    return normalizedWorldIds;
-  }
-
-  private isLevelSelectBusy(): boolean {
-    return this.loadingWorldId !== null || this.saveInFlight || this.levelMutationInFlight;
+    await this.levelLifecycleController.initializeLevelSelection();
   }
 
   private async refreshAvailableWorldIds(options: {
     preserveCurrentWorldId: boolean;
   }): Promise<void> {
-    const { preserveCurrentWorldId } = options;
-    const fallbackWorldIds = [...this.availableWorldIds];
-    this.levelSelectRefreshButton.disabled = true;
-
-    try {
-      const fetchedWorldIds = await fetchAvailableWorldIds();
-      if (this.disposed) {
-        return;
-      }
-
-      const normalizedWorldIds = this.normalizeWorldIds(fetchedWorldIds);
-      this.availableWorldIds =
-        normalizedWorldIds.length > 0 ? normalizedWorldIds : this.normalizeWorldIds(fallbackWorldIds);
-    } catch (error) {
-      console.warn("Failed to fetch world list", error);
-      this.availableWorldIds = this.normalizeWorldIds(fallbackWorldIds);
-      this.levelSelectMessage =
-        error instanceof Error ? `level refresh failed: ${error.message}` : "level refresh failed";
-    } finally {
-      if (!this.disposed) {
-        this.availableWorldIds = preserveCurrentWorldId
-          ? this.normalizeWorldIds([this.currentWorldId, ...this.availableWorldIds])
-          : this.normalizeWorldIds(this.availableWorldIds);
-        this.updateLevelSelectHud();
-      }
-    }
+    await this.levelLifecycleController.refreshAvailableWorldIds(options);
   }
 
   private async createLevelFromInput(): Promise<void> {
-    if (this.isLevelSelectBusy()) {
-      return;
-    }
-
-    const requestedWorldId = this.levelCreateInput.value.trim();
-    if (requestedWorldId.length === 0) {
-      this.levelSelectMessage = "enter a level id";
-      this.updateLevelSelectHud();
-      return;
-    }
-
-    this.levelMutationInFlight = true;
-    this.levelSelectMessage = `creating "${requestedWorldId}"...`;
-    this.updateLevelSelectHud();
-
-    try {
-      const createdWorldId = await createWorldLevel(requestedWorldId);
-      if (this.disposed) {
-        return;
-      }
-
-      this.levelCreateInput.value = "";
-      this.levelSelectMessage = `created "${createdWorldId}"`;
-      await this.refreshAvailableWorldIds({ preserveCurrentWorldId: true });
-      await this.selectWorldLevel(createdWorldId, true);
-    } catch (error) {
-      if (this.disposed) {
-        return;
-      }
-
-      this.levelSelectMessage =
-        error instanceof Error ? `create failed: ${error.message}` : "create failed";
-    } finally {
-      if (!this.disposed) {
-        this.levelMutationInFlight = false;
-        this.updateLevelSelectHud();
-      }
-    }
+    await this.levelLifecycleController.createLevelFromInput();
   }
 
   private async deleteWorldLevelById(worldId: string): Promise<void> {
-    if (this.isLevelSelectBusy()) {
-      return;
-    }
-
-    if (this.availableWorldIds.length <= 1) {
-      this.levelSelectMessage = "cannot remove the last level";
-      this.updateLevelSelectHud();
-      return;
-    }
-
-    if (!window.confirm(`Delete level "${worldId}"?`)) {
-      return;
-    }
-
-    const deletingCurrentWorld = worldId === this.currentWorldId;
-    this.levelMutationInFlight = true;
-    this.levelSelectMessage = `removing "${worldId}"...`;
-    this.updateLevelSelectHud();
-
-    try {
-      await deleteWorldLevel(worldId);
-      if (this.disposed) {
-        return;
-      }
-
-      this.levelSelectMessage = `removed "${worldId}"`;
-      await this.refreshAvailableWorldIds({
-        preserveCurrentWorldId: !deletingCurrentWorld,
-      });
-
-      if (deletingCurrentWorld) {
-        const nextWorldId = this.availableWorldIds[0] ?? DEFAULT_WORLD_ID;
-        await this.selectWorldLevel(nextWorldId, true);
-      }
-    } catch (error) {
-      if (this.disposed) {
-        return;
-      }
-
-      this.levelSelectMessage =
-        error instanceof Error ? `remove failed: ${error.message}` : "remove failed";
-    } finally {
-      if (!this.disposed) {
-        this.levelMutationInFlight = false;
-        this.updateLevelSelectHud();
-      }
-    }
+    await this.levelLifecycleController.deleteWorldLevelById(worldId);
   }
 
   private updateWorldQueryParam(worldId: string): void {
@@ -680,178 +597,19 @@ export class GameApp {
   }
 
   private async selectWorldLevel(worldIdInput: string, force: boolean = false): Promise<void> {
-    const worldId = worldIdInput.trim();
-    if (worldId.length === 0) {
-      return;
-    }
-
-    if (!force && worldId === this.currentWorldId && this.loadingWorldId === null) {
-      return;
-    }
-
-    const requestVersion = this.worldLoadVersion + 1;
-    this.worldLoadVersion = requestVersion;
-    this.loadingWorldId = worldId;
-    this.currentWorldId = worldId;
-    this.levelSelectMessage = null;
-    this.availableWorldIds = this.normalizeWorldIds([worldId, ...this.availableWorldIds]);
-    this.pendingCommitOperations = [];
-    this.refreshPendingSaveMessage();
-    this.saveMessage = `loading level "${worldId}"...`;
-    this.stopDraggingSphere();
-    this.worldStore.apply({ type: "deselectSphere" });
-    this.updateWorldQueryParam(worldId);
-    this.updateLevelSelectHud();
-    this.connectMultiplayer(worldId);
-
-    await this.loadWorldFromBackend(worldId, requestVersion);
-    if (this.disposed || requestVersion !== this.worldLoadVersion) {
-      return;
-    }
-
-    this.loadingWorldId = null;
-    this.movePlayerToCurrentWorld();
-    this.updateLevelSelectHud();
+    await this.levelLifecycleController.selectWorldLevel(worldIdInput, force);
   }
 
   private updateLevelSelectHud(): void {
-    this.levelSelectNode.hidden = !this.editorMode;
-    if (!this.editorMode) {
-      return;
-    }
-
-    if (this.loadingWorldId) {
-      this.levelSelectStatusNode.textContent = `Loading "${this.loadingWorldId}"...`;
-    } else if (this.levelMutationInFlight) {
-      this.levelSelectStatusNode.textContent = "Updating levels...";
-    } else if (this.levelSelectMessage) {
-      this.levelSelectStatusNode.textContent = this.levelSelectMessage;
-    } else {
-      this.levelSelectStatusNode.textContent = `Current: ${this.currentWorldId}`;
-    }
-
-    const controlsDisabled = this.isLevelSelectBusy();
-    this.levelCreateInput.disabled = controlsDisabled;
-    this.levelCreateButton.disabled = controlsDisabled;
-    const selectedWorldId = this.availableWorldIds.includes(this.currentWorldId)
-      ? this.currentWorldId
-      : (this.availableWorldIds[0] ?? "");
-    this.levelSelectDropdown.textContent = "";
-    for (const worldId of this.availableWorldIds) {
-      const option = document.createElement("option");
-      option.value = worldId;
-      option.textContent = worldId;
-      this.levelSelectDropdown.appendChild(option);
-    }
-    this.levelSelectDropdown.value = selectedWorldId;
-    this.levelSelectDropdown.disabled = controlsDisabled || this.availableWorldIds.length === 0;
-    this.levelRemoveButton.disabled = controlsDisabled || this.availableWorldIds.length <= 1;
-
-    this.levelSelectRefreshButton.disabled = controlsDisabled;
-  }
-
-  private async loadWorldFromBackend(worldId: string, requestVersion: number): Promise<void> {
-    this.worldSourceState = "loading";
-    this.updateLevelSelectHud();
-
-    try {
-      const loadedWorld = await fetchWorldSeed(worldId, this.userId);
-      if (this.disposed || requestVersion !== this.worldLoadVersion) {
-        return;
-      }
-
-      const hydrated = this.worldStore.apply({
-        type: "hydrateWorld",
-        world: loadedWorld.world,
-      });
-
-      this.backendWorldTick = loadedWorld.tick;
-      this.pendingCommitOperations = [];
-      this.refreshPendingSaveMessage();
-      this.worldSourceState = hydrated ? "backend" : "seed";
-      this.levelSelectMessage = null;
-      this.saveMessage = `loaded level "${worldId}"`;
-    } catch (error) {
-      if (this.disposed || requestVersion !== this.worldLoadVersion) {
-        return;
-      }
-
-      this.worldStore.apply({
-        type: "hydrateWorld",
-        world: buildSeedWorld(),
-      });
-      this.backendWorldTick = 0;
-      this.pendingCommitOperations = [];
-      this.refreshPendingSaveMessage();
-      this.worldSourceState = "seed";
-      this.levelSelectMessage = `load failed for "${worldId}"`;
-      this.saveMessage = `load failed for "${worldId}", using seed fallback`;
-      console.warn("Failed to load world from backend, using local seed world", error);
-    }
+    this.levelLifecycleController.renderLevelSelectHud();
   }
 
   private refreshPendingSaveMessage(): void {
-    if (this.saveInFlight) {
-      return;
-    }
-
-    if (this.pendingCommitOperations.length === 0) {
-      this.saveMessage = "no pending edits";
-      return;
-    }
-
-    this.saveMessage = `pending edits: ${this.pendingCommitOperations.length}`;
+    this.levelLifecycleController.refreshPendingSaveMessage();
   }
 
   private async saveWorldCommit(): Promise<void> {
-    if (this.saveInFlight) {
-      return;
-    }
-
-    if (this.pendingCommitOperations.length === 0) {
-      this.saveMessage = "no pending edits";
-      return;
-    }
-
-    this.saveInFlight = true;
-    this.saveMessage = `saving ${this.pendingCommitOperations.length} edit(s)...`;
-    this.updateLevelSelectHud();
-
-    try {
-      const response = await commitWorldChanges({
-        worldId: this.currentWorldId,
-        userId: this.userId,
-        baseTick: this.backendWorldTick,
-        operations: this.pendingCommitOperations,
-        focusSphereId: this.getMultiplayerTemplateFocusSphereId(),
-      });
-
-      this.worldStore.apply({
-        type: "hydrateWorld",
-        world: response.world,
-      });
-
-      this.backendWorldTick = response.tick;
-      this.pendingCommitOperations = [];
-      this.worldSourceState = response.savedTo === "master" ? "backend" : "backend-user";
-      const reasonSuffix = response.reason ? ` (${response.reason})` : "";
-      this.saveMessage = `saved ${response.commitId} -> ${response.savedTo}${reasonSuffix}`;
-    } catch (error) {
-      if (error instanceof WorldCommitError) {
-        if (error.validationErrors.length > 0) {
-          this.saveMessage = `save failed: ${error.validationErrors[0]}`;
-        } else {
-          this.saveMessage = `save failed: ${error.message}`;
-        }
-      } else if (error instanceof Error) {
-        this.saveMessage = `save failed: ${error.message}`;
-      } else {
-        this.saveMessage = "save failed: unknown error";
-      }
-    } finally {
-      this.saveInFlight = false;
-      this.updateLevelSelectHud();
-    }
+    await this.levelLifecycleController.saveWorldCommit();
   }
 
   private getOrCreateUserId(): string {
@@ -1722,13 +1480,12 @@ export class GameApp {
         type: "hydrateWorld",
         world: loaded.world,
       });
-      this.backendWorldTick = loaded.tick;
-      this.worldSourceState = commit.saved_to === "master" ? "backend" : "backend-user";
+      this.levelLifecycleController.applyMultiplayerWorldCommit(
+        commit.commit_id,
+        commit.saved_to,
+        loaded.tick,
+      );
       this.multiplayerError = null;
-
-      if (!this.saveInFlight) {
-        this.saveMessage = `synced ${commit.commit_id} via multiplayer`;
-      }
     } catch (error) {
       this.multiplayerError =
         error instanceof Error
