@@ -46,6 +46,9 @@ import {
   LevelLifecycleController,
   type WorldSourceState,
 } from "./levelLifecycleController";
+import { LevelSelectPanel } from "./levelSelectPanel";
+import { TemplateHudPanel } from "./templateHudPanel";
+import { GameplayHudPanel } from "./gameplayHudPanel";
 
 const FIXED_STEP_SECONDS = 1 / 60;
 const MOVE_SPEED = 18;
@@ -96,29 +99,10 @@ export class GameApp {
   private readonly camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
   private readonly renderer = new THREE.WebGLRenderer({ antialias: true });
   private readonly clock = new THREE.Clock();
-  private readonly hudNode: HTMLDivElement;
-  private readonly hintNode: HTMLDivElement;
-  private readonly crosshairNode: HTMLDivElement;
+  private readonly gameplayHudPanel: GameplayHudPanel;
   private readonly editorPanelsNode: HTMLDivElement;
-  private readonly templateHudNode: HTMLDivElement;
-  private readonly createTemplateValueNode: HTMLSpanElement;
-  private readonly selectedTemplateValueNode: HTMLSpanElement;
-  private readonly createTemplateDecreaseButton: HTMLButtonElement;
-  private readonly createTemplateIncreaseButton: HTMLButtonElement;
-  private readonly selectedTemplateDecreaseButton: HTMLButtonElement;
-  private readonly selectedTemplateIncreaseButton: HTMLButtonElement;
-  private readonly avatarDecreaseButton: HTMLButtonElement;
-  private readonly avatarIncreaseButton: HTMLButtonElement;
-  private readonly avatarValueNode: HTMLSpanElement;
-  private readonly selectedColorRowNode: HTMLDivElement;
-  private readonly selectedColorInputNode: HTMLInputElement;
-  private readonly levelSelectNode: HTMLDivElement;
-  private readonly levelSelectStatusNode: HTMLDivElement;
-  private readonly levelSelectDropdown: HTMLSelectElement;
-  private readonly levelRemoveButton: HTMLButtonElement;
-  private readonly levelCreateInput: HTMLInputElement;
-  private readonly levelCreateButton: HTMLButtonElement;
-  private readonly levelSelectRefreshButton: HTMLButtonElement;
+  private readonly templateHudPanel: TemplateHudPanel;
+  private readonly levelSelectPanel: LevelSelectPanel;
 
   private readonly controller: FpsController;
   private readonly worldStore = new LocalWorldStore(buildSeedWorld());
@@ -205,206 +189,42 @@ export class GameApp {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.mountNode.appendChild(this.renderer.domElement);
 
-    this.hudNode = document.createElement("div");
-    this.hudNode.className = "hud";
-    this.hudNode.hidden = true;
-    this.mountNode.appendChild(this.hudNode);
-
-    this.hintNode = document.createElement("div");
-    this.hintNode.className = "center-hint";
-    this.mountNode.appendChild(this.hintNode);
-
-    this.crosshairNode = document.createElement("div");
-    this.crosshairNode.className = "crosshair";
-    this.mountNode.appendChild(this.crosshairNode);
+    this.gameplayHudPanel = new GameplayHudPanel(this.mountNode);
 
     this.editorPanelsNode = document.createElement("div");
     this.editorPanelsNode.className = "editor-panels";
     this.mountNode.appendChild(this.editorPanelsNode);
 
-    this.templateHudNode = document.createElement("div");
-    this.templateHudNode.className = "template-hud";
-
-    const templateTitle = document.createElement("div");
-    templateTitle.className = "template-hud-title";
-    templateTitle.textContent = "Template IDs (0 = none)";
-    this.templateHudNode.appendChild(templateTitle);
-
-    const createRow = document.createElement("div");
-    createRow.className = "template-hud-row";
-    const createLabel = document.createElement("span");
-    createLabel.className = "template-hud-label";
-    createLabel.textContent = "Create";
-    createRow.appendChild(createLabel);
-
-    this.createTemplateDecreaseButton = document.createElement("button");
-    this.createTemplateDecreaseButton.type = "button";
-    this.createTemplateDecreaseButton.textContent = "-";
-    this.createTemplateDecreaseButton.addEventListener("click", () =>
-      this.adjustCreateTemplateId(-1),
+    this.templateHudPanel = new TemplateHudPanel(
+      this.encodeColorInputValue({
+        r: DEFAULT_SPHERE_COLOR_RED,
+        g: DEFAULT_SPHERE_COLOR_GREEN,
+        b: DEFAULT_SPHERE_COLOR_BLUE,
+      }),
+      {
+        onAdjustCreateTemplate: (delta) => this.adjustCreateTemplateId(delta),
+        onAdjustSelectedTemplate: (delta) => this.adjustSelectedTemplateId(delta),
+        onAdjustAvatar: (delta) => this.adjustSelectedAvatarId(delta),
+        onColorInput: (value) => this.onSelectedColorInput(value),
+      },
     );
-    createRow.appendChild(this.createTemplateDecreaseButton);
+    this.editorPanelsNode.appendChild(this.templateHudPanel.rootNode);
 
-    this.createTemplateValueNode = document.createElement("span");
-    this.createTemplateValueNode.className = "template-hud-value";
-    createRow.appendChild(this.createTemplateValueNode);
-
-    this.createTemplateIncreaseButton = document.createElement("button");
-    this.createTemplateIncreaseButton.type = "button";
-    this.createTemplateIncreaseButton.textContent = "+";
-    this.createTemplateIncreaseButton.addEventListener("click", () =>
-      this.adjustCreateTemplateId(1),
-    );
-    createRow.appendChild(this.createTemplateIncreaseButton);
-    this.templateHudNode.appendChild(createRow);
-
-    const selectedRow = document.createElement("div");
-    selectedRow.className = "template-hud-row";
-    const selectedLabel = document.createElement("span");
-    selectedLabel.className = "template-hud-label";
-    selectedLabel.textContent = "Selected";
-    selectedRow.appendChild(selectedLabel);
-
-    this.selectedTemplateDecreaseButton = document.createElement("button");
-    this.selectedTemplateDecreaseButton.type = "button";
-    this.selectedTemplateDecreaseButton.textContent = "-";
-    this.selectedTemplateDecreaseButton.addEventListener("click", () =>
-      this.adjustSelectedTemplateId(-1),
-    );
-    selectedRow.appendChild(this.selectedTemplateDecreaseButton);
-
-    this.selectedTemplateValueNode = document.createElement("span");
-    this.selectedTemplateValueNode.className = "template-hud-value";
-    selectedRow.appendChild(this.selectedTemplateValueNode);
-
-    this.selectedTemplateIncreaseButton = document.createElement("button");
-    this.selectedTemplateIncreaseButton.type = "button";
-    this.selectedTemplateIncreaseButton.textContent = "+";
-    this.selectedTemplateIncreaseButton.addEventListener("click", () =>
-      this.adjustSelectedTemplateId(1),
-    );
-    selectedRow.appendChild(this.selectedTemplateIncreaseButton);
-    this.templateHudNode.appendChild(selectedRow);
-
-    const avatarRow = document.createElement("div");
-    avatarRow.className = "template-hud-row";
-    const avatarLabelNode = document.createElement("span");
-    avatarLabelNode.className = "template-hud-label";
-    avatarLabelNode.textContent = "Avatar";
-    avatarRow.appendChild(avatarLabelNode);
-
-    this.avatarDecreaseButton = document.createElement("button");
-    this.avatarDecreaseButton.type = "button";
-    this.avatarDecreaseButton.textContent = "-";
-    this.avatarDecreaseButton.addEventListener("click", () =>
-      this.adjustSelectedAvatarId(-1),
-    );
-    avatarRow.appendChild(this.avatarDecreaseButton);
-
-    this.avatarValueNode = document.createElement("span");
-    this.avatarValueNode.className = "template-hud-value";
-    avatarRow.appendChild(this.avatarValueNode);
-
-    this.avatarIncreaseButton = document.createElement("button");
-    this.avatarIncreaseButton.type = "button";
-    this.avatarIncreaseButton.textContent = "+";
-    this.avatarIncreaseButton.addEventListener("click", () =>
-      this.adjustSelectedAvatarId(1),
-    );
-    avatarRow.appendChild(this.avatarIncreaseButton);
-    this.templateHudNode.appendChild(avatarRow);
-
-    this.selectedColorRowNode = document.createElement("div");
-    this.selectedColorRowNode.className = "template-hud-color-row";
-
-    const selectedColorLabel = document.createElement("span");
-    selectedColorLabel.className = "template-hud-label";
-    selectedColorLabel.textContent = "Color";
-    this.selectedColorRowNode.appendChild(selectedColorLabel);
-
-    this.selectedColorInputNode = document.createElement("input");
-    this.selectedColorInputNode.type = "color";
-    this.selectedColorInputNode.className = "template-hud-color-input";
-    this.selectedColorInputNode.value = this.encodeColorInputValue({
-      r: DEFAULT_SPHERE_COLOR_RED,
-      g: DEFAULT_SPHERE_COLOR_GREEN,
-      b: DEFAULT_SPHERE_COLOR_BLUE,
+    this.levelSelectPanel = new LevelSelectPanel({
+      onSelectWorld: (worldId) => {
+        void this.selectWorldLevel(worldId);
+      },
+      onRemoveSelectedWorld: (worldId) => {
+        void this.deleteWorldLevelById(worldId);
+      },
+      onCreateFromInput: () => {
+        void this.createLevelFromInput();
+      },
+      onRefresh: () => {
+        void this.refreshAvailableWorldIds({ preserveCurrentWorldId: true });
+      },
     });
-    this.selectedColorInputNode.addEventListener("input", this.onSelectedColorInput);
-    this.selectedColorRowNode.appendChild(this.selectedColorInputNode);
-    this.templateHudNode.appendChild(this.selectedColorRowNode);
-
-    this.editorPanelsNode.appendChild(this.templateHudNode);
-
-    this.levelSelectNode = document.createElement("div");
-    this.levelSelectNode.className = "level-select";
-
-    const levelSelectTitle = document.createElement("div");
-    levelSelectTitle.className = "level-select-title";
-    levelSelectTitle.textContent = "Level Select";
-    this.levelSelectNode.appendChild(levelSelectTitle);
-
-    this.levelSelectStatusNode = document.createElement("div");
-    this.levelSelectStatusNode.className = "level-select-status";
-    this.levelSelectNode.appendChild(this.levelSelectStatusNode);
-
-    const levelSelectRow = document.createElement("div");
-    levelSelectRow.className = "level-select-row";
-
-    this.levelSelectDropdown = document.createElement("select");
-    this.levelSelectDropdown.className = "level-select-dropdown";
-    this.levelSelectDropdown.addEventListener("change", () => {
-      void this.selectWorldLevel(this.levelSelectDropdown.value);
-    });
-    levelSelectRow.appendChild(this.levelSelectDropdown);
-
-    this.levelRemoveButton = document.createElement("button");
-    this.levelRemoveButton.type = "button";
-    this.levelRemoveButton.className = "level-select-delete";
-    this.levelRemoveButton.textContent = "Remove";
-    this.levelRemoveButton.addEventListener("click", () => {
-      void this.deleteWorldLevelById(this.levelSelectDropdown.value);
-    });
-    levelSelectRow.appendChild(this.levelRemoveButton);
-    this.levelSelectNode.appendChild(levelSelectRow);
-
-    const levelCreateRow = document.createElement("div");
-    levelCreateRow.className = "level-select-create";
-
-    this.levelCreateInput = document.createElement("input");
-    this.levelCreateInput.className = "level-select-input";
-    this.levelCreateInput.type = "text";
-    this.levelCreateInput.placeholder = "new-level-id";
-    this.levelCreateInput.autocomplete = "off";
-    this.levelCreateInput.spellcheck = false;
-    this.levelCreateInput.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter") {
-        return;
-      }
-      event.preventDefault();
-      void this.createLevelFromInput();
-    });
-    levelCreateRow.appendChild(this.levelCreateInput);
-
-    this.levelCreateButton = document.createElement("button");
-    this.levelCreateButton.type = "button";
-    this.levelCreateButton.className = "level-select-create-button";
-    this.levelCreateButton.textContent = "Add";
-    this.levelCreateButton.addEventListener("click", () => {
-      void this.createLevelFromInput();
-    });
-    levelCreateRow.appendChild(this.levelCreateButton);
-    this.levelSelectNode.appendChild(levelCreateRow);
-
-    this.levelSelectRefreshButton = document.createElement("button");
-    this.levelSelectRefreshButton.type = "button";
-    this.levelSelectRefreshButton.className = "level-select-refresh";
-    this.levelSelectRefreshButton.textContent = "Refresh";
-    this.levelSelectRefreshButton.addEventListener("click", () => {
-      void this.refreshAvailableWorldIds({ preserveCurrentWorldId: true });
-    });
-    this.levelSelectNode.appendChild(this.levelSelectRefreshButton);
-    this.editorPanelsNode.appendChild(this.levelSelectNode);
+    this.editorPanelsNode.appendChild(this.levelSelectPanel.rootNode);
 
     const queryWorldId = new URLSearchParams(window.location.search).get("world");
     const initialWorldId =
@@ -413,15 +233,7 @@ export class GameApp {
     this.levelLifecycleController = new LevelLifecycleController({
       defaultWorldId: DEFAULT_WORLD_ID,
       initialWorldId,
-      ui: {
-        levelSelectNode: this.levelSelectNode,
-        levelSelectStatusNode: this.levelSelectStatusNode,
-        levelSelectDropdown: this.levelSelectDropdown,
-        levelRemoveButton: this.levelRemoveButton,
-        levelCreateInput: this.levelCreateInput,
-        levelCreateButton: this.levelCreateButton,
-        levelSelectRefreshButton: this.levelSelectRefreshButton,
-      },
+      ui: this.levelSelectPanel.refs,
       callbacks: {
         userId: this.userId,
         isDisposed: () => this.disposed,
@@ -450,7 +262,7 @@ export class GameApp {
 
     this.setupScene();
     this.unsubscribeWorldStore = this.worldStore.subscribe(this.onWorldStoreChanged);
-    this.updateHintText();
+    this.gameplayHudPanel.renderHint(this.editorMode);
     this.updateTemplateHud();
     this.updateLevelSelectHud();
     this.recolorObstacles();
@@ -1175,26 +987,13 @@ export class GameApp {
     const selectedTemplateId = this.readTemplateId(selectedSphere);
     const selectedSphereColor = this.readSphereColorChannels(selectedSphere);
 
-    this.templateHudNode.hidden = !this.editorMode;
-    this.templateHudNode.classList.toggle("template-hud-disabled", !this.editorMode);
-    this.createTemplateValueNode.textContent = `${this.createTemplateId}`;
-    this.selectedTemplateValueNode.textContent = selectedSphere
-      ? `${selectedTemplateId}`
-      : "none";
-    this.avatarValueNode.textContent = avatarLabel(this.selectedAvatarId);
-
-    const createEnabled = this.editorMode;
-    const selectedEnabled = this.editorMode && selectedSphere !== null;
-
-    this.createTemplateDecreaseButton.disabled = !createEnabled;
-    this.createTemplateIncreaseButton.disabled = !createEnabled;
-    this.selectedTemplateDecreaseButton.disabled = !selectedEnabled;
-    this.selectedTemplateIncreaseButton.disabled = !selectedEnabled;
-    this.avatarDecreaseButton.disabled = !createEnabled;
-    this.avatarIncreaseButton.disabled = !createEnabled;
-    this.selectedColorRowNode.hidden = !selectedEnabled;
-    this.selectedColorInputNode.disabled = !selectedEnabled;
-    this.selectedColorInputNode.value = this.encodeColorInputValue(selectedSphereColor);
+    this.templateHudPanel.render({
+      editorMode: this.editorMode,
+      createTemplateId: this.createTemplateId,
+      selectedTemplateId: selectedSphere ? selectedTemplateId : null,
+      avatarLabel: avatarLabel(this.selectedAvatarId),
+      selectedColorValue: this.encodeColorInputValue(selectedSphereColor),
+    });
   }
 
   private movePlayerToCurrentWorld(): void {
@@ -1546,17 +1345,13 @@ export class GameApp {
   };
 
   private readonly onPointerLockChange = (): void => {
-    if (this.controller.isPointerLocked()) {
-      this.hintNode.style.opacity = "0";
-      return;
-    }
-    this.hintNode.style.opacity = "1";
+    this.gameplayHudPanel.setPointerLocked(this.controller.isPointerLocked());
   };
 
   private isEditorHudTarget(target: EventTarget | null): boolean {
     return (
       target instanceof Node &&
-      (this.templateHudNode.contains(target) || this.levelSelectNode.contains(target))
+      (this.templateHudPanel.contains(target) || this.levelSelectPanel.rootNode.contains(target))
     );
   }
 
@@ -1589,7 +1384,7 @@ export class GameApp {
     ].includes(inputType);
   }
 
-  private readonly onSelectedColorInput = (): void => {
+  private readonly onSelectedColorInput = (inputValue: string): void => {
     if (!this.editorMode) {
       return;
     }
@@ -1599,7 +1394,7 @@ export class GameApp {
       return;
     }
 
-    const parsedColor = this.parseColorInputValue(this.selectedColorInputNode.value);
+    const parsedColor = this.parseColorInputValue(inputValue);
     if (!parsedColor) {
       return;
     }
@@ -2021,7 +1816,7 @@ export class GameApp {
       this.stopDraggingSphere();
       this.worldStore.apply({ type: "deselectSphere" });
     }
-    this.updateHintText();
+    this.gameplayHudPanel.renderHint(this.editorMode);
     this.updateTemplateHud();
     this.updateLevelSelectHud();
     this.recolorObstacles();
@@ -2166,53 +1961,36 @@ export class GameApp {
     }
   }
 
-  private updateHintText(): void {
-    if (this.editorMode) {
-      this.hintNode.textContent =
-        "EDIT MODE | ~ exit editor | C create | E select | F enter selected template / exit | Q deselect | Z delete | wheel resize | hold RMB drag | Cmd/Ctrl+S save";
-      return;
-    }
-
-    this.hintNode.textContent =
-      "Click to lock pointer | WASD + Space | ~ editor mode";
-  }
-
   private updateHud(): void {
-    this.hudNode.hidden = !this.editorMode;
-    if (!this.editorMode) {
-      return;
-    }
-
-    const selectedSphereId = this.worldStore.getSelectedSphereId();
-
-    this.hudNode.textContent =
-      `tick: ${this.tick}\n` +
-      `position: ${this.player.position.x.toFixed(2)}, ${this.player.position.y.toFixed(2)}, ${this.player.position.z.toFixed(2)}\n` +
-      `velocity: ${this.player.velocity.x.toFixed(2)}, ${this.player.velocity.y.toFixed(2)}, ${this.player.velocity.z.toFixed(2)}\n` +
-      `grounded: ${this.player.grounded ? "yes" : "no"}\n` +
-      `collisions: ${this.lastCollisionCount}\n` +
-      `overlay: ${this.overlayEnabled ? "money (blue)" : "off"}\n` +
-      `editor: ${this.editorMode ? "on" : "off"}\n` +
-      `dragging: ${this.draggingSphereId ?? "none"}\n` +
-      `create template: ${this.createTemplateId}\n` +
-      `avatar: ${this.selectedAvatarId}\n` +
-      `selected: ${selectedSphereId ?? "none"}\n` +
-      `world id: ${this.currentWorldId}\n` +
-      `levels: ${this.availableWorldIds.length}\n` +
-      `world parent: ${this.parentSphere.id}\n` +
-      `spheres: ${this.obstacles.length}\n` +
-      `world source: ${this.worldSourceState}\n` +
-      `world tick: ${this.backendWorldTick}\n` +
-      `pending edits: ${this.pendingCommitOperations.length}\n` +
-      `save: ${this.saveMessage}\n` +
-      `user: ${this.userId}\n` +
-      `multiplayer: ${this.multiplayerStatus}\n` +
-      `player id: ${this.localPlayerId ?? "pending"}\n` +
-      `remote players: ${this.remoteAvatarRenderSystem.remotePlayerCount}\n` +
-      `input seq ack: ${this.localPredictionReconciler.ackedInputSequence}\n` +
-      `pending predicted inputs: ${this.localPredictionReconciler.pendingPredictedInputCount}\n` +
-      `last snapshot tick: ${this.localPredictionReconciler.lastSnapshotTick}\n` +
-      `reconcile error: ${this.localPredictionReconciler.lastReconciliationErrorDistance.toFixed(4)}\n` +
-      `mp error: ${this.multiplayerError ?? "none"}`;
+    this.gameplayHudPanel.renderDebug({
+      editorMode: this.editorMode,
+      tick: this.tick,
+      playerPosition: this.player.position,
+      playerVelocity: this.player.velocity,
+      playerGrounded: this.player.grounded,
+      lastCollisionCount: this.lastCollisionCount,
+      overlayEnabled: this.overlayEnabled,
+      draggingSphereId: this.draggingSphereId,
+      createTemplateId: this.createTemplateId,
+      selectedAvatarId: this.selectedAvatarId,
+      selectedSphereId: this.worldStore.getSelectedSphereId(),
+      currentWorldId: this.currentWorldId,
+      availableWorldCount: this.availableWorldIds.length,
+      parentSphereId: this.parentSphere.id,
+      obstacleCount: this.obstacles.length,
+      worldSourceState: this.worldSourceState,
+      backendWorldTick: this.backendWorldTick,
+      pendingCommitCount: this.pendingCommitOperations.length,
+      saveMessage: this.saveMessage,
+      userId: this.userId,
+      multiplayerStatus: this.multiplayerStatus,
+      localPlayerId: this.localPlayerId,
+      remotePlayerCount: this.remoteAvatarRenderSystem.remotePlayerCount,
+      ackedInputSequence: this.localPredictionReconciler.ackedInputSequence,
+      pendingPredictedInputCount: this.localPredictionReconciler.pendingPredictedInputCount,
+      lastSnapshotTick: this.localPredictionReconciler.lastSnapshotTick,
+      reconciliationErrorDistance: this.localPredictionReconciler.lastReconciliationErrorDistance,
+      multiplayerError: this.multiplayerError,
+    });
   }
 }
