@@ -7,7 +7,6 @@ import {
   type ObstacleBody,
   type PlayerBody,
 } from "./physics";
-import { KEYBINDINGS, matchesKeyBinding } from "./keybindings";
 import {
   getAvailableSubworldTemplateIds,
   getTemplateRootRadius,
@@ -50,6 +49,7 @@ import { LevelSelectPanel } from "./levelSelectPanel";
 import { TemplateHudPanel } from "./templateHudPanel";
 import { GameplayHudPanel } from "./gameplayHudPanel";
 import { EditorInteractionController } from "./editorInteractionController";
+import { EditorKeyboardController } from "./editorKeyboardController";
 
 const FIXED_STEP_SECONDS = 1 / 60;
 const MOVE_SPEED = 18;
@@ -102,6 +102,7 @@ export class GameApp {
   private readonly editorPanelsNode: HTMLDivElement;
   private readonly templateHudPanel: TemplateHudPanel;
   private readonly levelSelectPanel: LevelSelectPanel;
+  private readonly editorKeyboardController: EditorKeyboardController;
 
   private readonly controller: FpsController;
   private readonly worldStore = new LocalWorldStore(buildSeedWorld());
@@ -297,6 +298,25 @@ export class GameApp {
           this.refreshPendingSaveMessage();
         },
       },
+    });
+    this.editorKeyboardController = new EditorKeyboardController({
+      requestSave: () => {
+        void this.saveWorldCommit();
+      },
+      isEditorMode: () => this.editorMode,
+      toggleOverlay: () => {
+        this.overlayEnabled = !this.overlayEnabled;
+        this.recolorObstacles();
+      },
+      toggleEditorMode: () => this.toggleEditorMode(),
+      createSphere: () => this.createSphereInFrontOfPlayer(),
+      deselectSphere: () => {
+        this.stopDraggingSphere();
+        this.worldStore.apply({ type: "deselectSphere" });
+      },
+      selectSphereAtReticle: () => this.selectSphereAtReticle(),
+      enterSelectedSphereWorld: () => this.handleEnterOrExitWorldShortcut(),
+      deleteSelectedSphere: () => this.deleteSelectedSphere(),
     });
 
     this.setupScene();
@@ -1338,35 +1358,6 @@ export class GameApp {
     );
   }
 
-  private isTypingTarget(target: EventTarget | null): boolean {
-    if (!(target instanceof Element)) {
-      return false;
-    }
-
-    const editableElement = target.closest("input, textarea, select, [contenteditable]");
-    if (!editableElement) {
-      return false;
-    }
-
-    if (!(editableElement instanceof HTMLInputElement)) {
-      return true;
-    }
-
-    const inputType = editableElement.type.toLowerCase();
-    return ![
-      "button",
-      "checkbox",
-      "color",
-      "file",
-      "hidden",
-      "image",
-      "radio",
-      "range",
-      "reset",
-      "submit",
-    ].includes(inputType);
-  }
-
   private readonly onSelectedColorInput = (inputValue: string): void => {
     if (!this.editorMode) {
       return;
@@ -1417,66 +1408,7 @@ export class GameApp {
   };
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
-      event.preventDefault();
-      void this.saveWorldCommit();
-      return;
-    }
-
-    if (this.isTypingTarget(event.target) || event.isComposing) {
-      return;
-    }
-
-    if (event.repeat) {
-      return;
-    }
-
-    if (matchesKeyBinding(event, KEYBINDINGS.toggleOverlay)) {
-      event.preventDefault();
-      this.overlayEnabled = !this.overlayEnabled;
-      this.recolorObstacles();
-      return;
-    }
-
-    if (matchesKeyBinding(event, KEYBINDINGS.toggleEditorMode)) {
-      event.preventDefault();
-      this.toggleEditorMode();
-      return;
-    }
-
-    if (!this.editorMode) {
-      return;
-    }
-
-    if (matchesKeyBinding(event, KEYBINDINGS.createSphere)) {
-      event.preventDefault();
-      this.createSphereInFrontOfPlayer();
-      return;
-    }
-
-    if (matchesKeyBinding(event, KEYBINDINGS.deselectSphere)) {
-      event.preventDefault();
-      this.stopDraggingSphere();
-      this.worldStore.apply({ type: "deselectSphere" });
-      return;
-    }
-
-    if (matchesKeyBinding(event, KEYBINDINGS.selectLookedAtSphere)) {
-      event.preventDefault();
-      this.selectSphereAtReticle();
-      return;
-    }
-
-    if (matchesKeyBinding(event, KEYBINDINGS.enterSelectedSphereWorld)) {
-      event.preventDefault();
-      this.handleEnterOrExitWorldShortcut();
-      return;
-    }
-
-    if (matchesKeyBinding(event, KEYBINDINGS.deleteSelectedSphere)) {
-      event.preventDefault();
-      this.deleteSelectedSphere();
-    }
+    this.editorKeyboardController.handleKeyDown(event);
   };
 
   private readonly animate = (): void => {
