@@ -78,10 +78,10 @@ const BASE_AVATAR_STYLES: Record<AvatarId, AvatarRenderStyle> = {
 };
 
 const DEFAULT_DUCK_AVATAR_LAYOUT: DuckAvatarLayout = {
-  headYOffset: 0.92,
-  headZOffset: 0.06,
-  beakYOffset: 0.82,
-  beakZOffset: -0.56,
+  headYOffset: 1,
+  headZOffset: 0,
+  beakYOffset: 1.05,
+  beakZOffset: -0.51,
   beakRotationX: -Math.PI / 2,
 };
 
