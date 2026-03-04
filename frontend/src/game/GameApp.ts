@@ -864,6 +864,7 @@ export class GameApp {
         userId: this.userId,
         baseTick: this.backendWorldTick,
         operations: this.pendingCommitOperations,
+        focusSphereId: this.getMultiplayerTemplateFocusSphereId(),
       });
 
       this.worldStore.apply({
@@ -1132,6 +1133,11 @@ export class GameApp {
 
   private isTemplateRootSphere(entity: SphereEntity): boolean {
     return entity.tags.includes(TEMPLATE_ROOT_TAG);
+  }
+
+  private getMultiplayerTemplateFocusSphereId(): string | null {
+    const activeParent = this.worldStore.getParentSphere();
+    return this.isTemplateRootSphere(activeParent) ? activeParent.id : null;
   }
 
   private getTemplateRootSphere(templateId: number): SphereEntity | null {
@@ -1705,6 +1711,7 @@ export class GameApp {
       userId: this.userId,
       worldId,
       avatarId: this.selectedAvatarId,
+      focusSphereId: this.getMultiplayerTemplateFocusSphereId(),
       callbacks: {
         onStatus: (status) => {
           this.multiplayerStatus = status;
@@ -2488,6 +2495,7 @@ export class GameApp {
       orientation.pitch,
       inputSequence,
       this.selectedAvatarId,
+      this.getMultiplayerTemplateFocusSphereId(),
     );
     this.lastNetworkSendTick = this.tick;
   }

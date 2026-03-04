@@ -133,6 +133,10 @@ Current implementation includes:
   - Delta multiplayer snapshots:
     - server tracks per-connection snapshot baselines and emits `state_snapshot_delta` messages between periodic full snapshots.
     - client reconstructs authoritative full snapshots from deltas, with automatic fallback to next full baseline on mismatch.
+  - Template-focused stream suppression:
+    - FPS client now publishes `focus_sphere_id` during template edit context (shared template root).
+    - player snapshots are now partitioned by focus context, so template editors no longer leak position updates into main world streams.
+    - master world commit broadcasts are delivered only to sessions in the same focus context.
   - Backend delete semantics now reject deleting non-leaf spheres (prevents orphaned parent references).
   - Sprint 1 closeout artifact with acceptance evidence: [docs/sprint-1-closeout.md](docs/sprint-1-closeout.md).
   - Sprint 2 closeout artifact with authoritative movement acceptance evidence: [docs/sprint-2-closeout.md](docs/sprint-2-closeout.md).

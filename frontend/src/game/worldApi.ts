@@ -53,6 +53,7 @@ interface BackendCommitRequest {
   user_id: string;
   base_tick: number;
   operations: BackendCommitOperation[];
+  focus_sphere_id?: string | null;
 }
 
 type BackendCommitOperation =
@@ -121,6 +122,7 @@ export interface CommitWorldParams {
   userId: string;
   baseTick: number;
   operations: WorldCommitOperation[];
+  focusSphereId?: string | null;
 }
 
 export interface CommitWorldResult {
@@ -494,6 +496,7 @@ export async function commitWorldChanges(
     user_id: params.userId,
     base_tick: params.baseTick,
     operations: params.operations.map(toBackendCommitOperation),
+    focus_sphere_id: params.focusSphereId ?? null,
   };
 
   const response = await fetch(

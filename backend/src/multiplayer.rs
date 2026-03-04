@@ -25,6 +25,15 @@ fn normalize_avatar_id_option(raw_avatar_id: Option<&str>) -> Option<String> {
     }
 }
 
+fn normalize_focus_sphere_id_option(raw_focus_sphere_id: Option<&str>) -> Option<String> {
+    let normalized = raw_focus_sphere_id?.trim();
+    if normalized.is_empty() {
+        return None;
+    }
+
+    Some(normalized.to_string())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerInputEnqueueResult {
     Queued,
@@ -39,6 +48,7 @@ struct PlayerInputCommand {
     yaw: f32,
     pitch: f32,
     avatar_id: Option<String>,
+    focus_sphere_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +60,7 @@ pub struct MultiplayerPlayerState {
     pub yaw: f32,
     pub pitch: f32,
     pub avatar_id: String,
+    pub focus_sphere_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,6 +192,28 @@ pub fn filter_snapshot_players_for_observer(
     filtered
 }
 
+pub fn filter_snapshot_players_for_focus_context(
+    players: &[MultiplayerPlayerSnapshot],
+    observer_player_id: &str,
+    focus_context_by_player_id: &HashMap<String, Option<String>>,
+) -> Vec<MultiplayerPlayerSnapshot> {
+    let Some(observer_focus_context) = focus_context_by_player_id.get(observer_player_id) else {
+        // During connect/disconnect churn, fail open rather than dropping entities.
+        return players.to_vec();
+    };
+
+    let mut filtered = players
+        .iter()
+        .filter(|player| {
+            focus_context_by_player_id.get(player.player_id.as_str())
+                == Some(observer_focus_context)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    filtered.sort_by(|a, b| a.player_id.cmp(&b.player_id));
+    filtered
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMultiplayerMessage {
@@ -189,6 +222,8 @@ pub enum ClientMultiplayerMessage {
         world_id: Option<String>,
         #[serde(default)]
         avatar_id: Option<String>,
+        #[serde(default)]
+        focus_sphere_id: Option<String>,
     },
     PlayerUpdate {
         position_3d: [f32; 3],
@@ -197,6 +232,8 @@ pub enum ClientMultiplayerMessage {
         client_tick: u64,
         #[serde(default)]
         avatar_id: Option<String>,
+        #[serde(default)]
+        focus_sphere_id: Option<String>,
     },
     Ping,
 }
@@ -226,6 +263,7 @@ pub enum ServerMultiplayerMessage {
         commit_id: String,
         saved_to: CommitTarget,
         user_id: Option<String>,
+        focus_sphere_id: Option<String>,
         world: WorldSnapshot,
     },
     Error {
@@ -270,6 +308,12 @@ impl AuthoritativePlayerStore {
         }
     }
 
+    fn set_player_focus(&mut self, player_id: &str, focus_sphere_id: Option<String>) {
+        if let Some(player) = self.get_player_mut(player_id) {
+            player.focus_sphere_id = normalize_focus_sphere_id_option(focus_sphere_id.as_deref());
+        }
+    }
+
     fn update_player_pose(
         &mut self,
         player_id: &str,
@@ -278,6 +322,7 @@ impl AuthoritativePlayerStore {
         yaw: f32,
         pitch: f32,
         avatar_id: Option<String>,
+        focus_sphere_id: Option<String>,
     ) -> PlayerInputEnqueueResult {
         if !self.world_by_player_id.contains_key(player_id) {
             return PlayerInputEnqueueResult::PlayerMissing;
@@ -307,6 +352,7 @@ impl AuthoritativePlayerStore {
                 yaw,
                 pitch,
                 avatar_id: normalize_avatar_id_option(avatar_id.as_deref()),
+                focus_sphere_id: normalize_focus_sphere_id_option(focus_sphere_id.as_deref()),
             },
         );
         PlayerInputEnqueueResult::Queued
@@ -348,6 +394,7 @@ impl AuthoritativePlayerStore {
                     if let Some(avatar_id) = command.avatar_id {
                         player.avatar_id = avatar_id;
                     }
+                    player.focus_sphere_id = command.focus_sphere_id;
                     next_processed = Some(command.client_tick);
                 }
             }
@@ -432,6 +479,12 @@ impl AuthoritativePlayerStore {
     fn get_player_mut(&mut self, player_id: &str) -> Option<&mut MultiplayerPlayerState> {
         let world_id = self.world_by_player_id.get(player_id)?.clone();
         self.by_world.get_mut(&world_id)?.get_mut(player_id)
+    }
+
+    fn player_focus_sphere_id(&self, player_id: &str) -> Option<String> {
+        let world_id = self.world_by_player_id.get(player_id)?;
+        let player = self.by_world.get(world_id)?.get(player_id)?;
+        player.focus_sphere_id.clone()
     }
 }
 
@@ -521,6 +574,7 @@ impl MultiplayerHub {
             yaw: 0.0,
             pitch: 0.0,
             avatar_id: DEFAULT_AVATAR_ID.to_string(),
+            focus_sphere_id: None,
         };
 
         self.players
@@ -553,6 +607,14 @@ impl MultiplayerHub {
             .set_player_avatar(player_id, avatar_id);
     }
 
+    pub async fn set_player_focus(&self, player_id: &str, focus_sphere_id: Option<String>) {
+        self.players
+            .write()
+            .await
+            .set_player_focus(player_id, focus_sphere_id);
+    }
+
+    #[cfg(test)]
     pub async fn update_player(
         &self,
         player_id: &str,
@@ -562,6 +624,28 @@ impl MultiplayerHub {
         client_tick: u64,
         avatar_id: Option<String>,
     ) -> PlayerInputEnqueueResult {
+        self.update_player_with_focus(
+            player_id,
+            position_3d,
+            yaw,
+            pitch,
+            client_tick,
+            avatar_id,
+            None,
+        )
+        .await
+    }
+
+    pub async fn update_player_with_focus(
+        &self,
+        player_id: &str,
+        position_3d: [f32; 3],
+        yaw: f32,
+        pitch: f32,
+        client_tick: u64,
+        avatar_id: Option<String>,
+        focus_sphere_id: Option<String>,
+    ) -> PlayerInputEnqueueResult {
         self.players.write().await.update_player_pose(
             player_id,
             client_tick,
@@ -569,6 +653,40 @@ impl MultiplayerHub {
             yaw,
             pitch,
             avatar_id,
+            focus_sphere_id,
+        )
+    }
+
+    #[cfg(test)]
+    pub async fn player_focus_sphere_id(&self, player_id: &str) -> Option<String> {
+        self.players.read().await.player_focus_sphere_id(player_id)
+    }
+
+    pub async fn filter_snapshot_players_for_observer_focus_context(
+        &self,
+        players: &[MultiplayerPlayerSnapshot],
+        observer_player_id: &str,
+    ) -> Vec<MultiplayerPlayerSnapshot> {
+        let store = self.players.read().await;
+        let mut focus_context_by_player_id = HashMap::with_capacity(players.len() + 1);
+        for player in players {
+            focus_context_by_player_id.insert(
+                player.player_id.clone(),
+                store.player_focus_sphere_id(player.player_id.as_str()),
+            );
+        }
+
+        if !focus_context_by_player_id.contains_key(observer_player_id) {
+            focus_context_by_player_id.insert(
+                observer_player_id.to_string(),
+                store.player_focus_sphere_id(observer_player_id),
+            );
+        }
+
+        filter_snapshot_players_for_focus_context(
+            players,
+            observer_player_id,
+            &focus_context_by_player_id,
         )
     }
 
@@ -596,6 +714,7 @@ impl MultiplayerHub {
         commit_id: String,
         saved_to: CommitTarget,
         user_id: Option<String>,
+        focus_sphere_id: Option<String>,
         world: WorldSnapshot,
     ) {
         let _ = self.tx.send(ServerMultiplayerMessage::WorldCommitApplied {
@@ -603,6 +722,7 @@ impl MultiplayerHub {
             commit_id,
             saved_to,
             user_id,
+            focus_sphere_id,
             world,
         });
     }
@@ -612,11 +732,12 @@ impl MultiplayerHub {
 mod tests {
     use super::{
         build_snapshot_delta, filter_snapshot_players_for_observer, snapshot_players_by_id,
-        MultiplayerHub, MultiplayerPlayerSnapshot, PlayerInputEnqueueResult, ServerMultiplayerMessage,
+        filter_snapshot_players_for_focus_context, MultiplayerHub, MultiplayerPlayerSnapshot,
+        PlayerInputEnqueueResult, ServerMultiplayerMessage,
     };
     use crate::aoi::AoiPolicy;
     use crate::protocol::{example_world_snapshot, CommitTarget};
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashMap};
     use tokio::time::{timeout, Duration};
 
     #[tokio::test]
@@ -1189,6 +1310,7 @@ mod tests {
             "master-1".to_string(),
             CommitTarget::Master,
             None,
+            None,
             world.clone(),
         );
 
@@ -1290,6 +1412,101 @@ mod tests {
         let missing =
             filter_snapshot_players_for_observer(&players, "missing-player", AoiPolicy::default());
         assert_eq!(missing.len(), players.len());
+    }
+
+    #[test]
+    fn filter_snapshot_players_for_focus_context_partitions_like_world_contexts() {
+        let players = vec![
+            MultiplayerPlayerSnapshot {
+                player_id: "observer".to_string(),
+                position_3d: [0.0, 0.0, 0.0],
+                yaw: 0.0,
+                pitch: 0.0,
+                avatar_id: "duck".to_string(),
+                last_processed_input_tick: 1,
+            },
+            MultiplayerPlayerSnapshot {
+                player_id: "other".to_string(),
+                position_3d: [1.0, 0.0, 0.0],
+                yaw: 0.0,
+                pitch: 0.0,
+                avatar_id: "human".to_string(),
+                last_processed_input_tick: 1,
+            },
+            MultiplayerPlayerSnapshot {
+                player_id: "peer-focused".to_string(),
+                position_3d: [2.0, 0.0, 0.0],
+                yaw: 0.0,
+                pitch: 0.0,
+                avatar_id: "duck".to_string(),
+                last_processed_input_tick: 1,
+            },
+        ];
+        let mut focus_context_by_player_id = HashMap::<String, Option<String>>::new();
+        focus_context_by_player_id.insert(
+            "observer".to_string(),
+            Some("sphere-template-root-1".to_string()),
+        );
+        focus_context_by_player_id.insert("other".to_string(), None);
+        focus_context_by_player_id.insert(
+            "peer-focused".to_string(),
+            Some("sphere-template-root-1".to_string()),
+        );
+
+        let focused = filter_snapshot_players_for_focus_context(
+            &players,
+            "observer",
+            &focus_context_by_player_id,
+        );
+        assert_eq!(focused.len(), 2);
+        assert_eq!(focused[0].player_id, "observer");
+        assert_eq!(focused[1].player_id, "peer-focused");
+
+        let unfocused = filter_snapshot_players_for_focus_context(
+            &players,
+            "other",
+            &focus_context_by_player_id,
+        );
+        assert_eq!(unfocused.len(), 1);
+        assert_eq!(unfocused[0].player_id, "other");
+
+        let missing_observer = filter_snapshot_players_for_focus_context(
+            &players,
+            "missing-observer",
+            &focus_context_by_player_id,
+        );
+        assert_eq!(missing_observer.len(), players.len());
+    }
+
+    #[tokio::test]
+    async fn player_focus_sphere_id_updates_on_pose_commands() {
+        let hub = MultiplayerHub::new_without_snapshot_loop();
+        let player = hub
+            .add_player("user-focus".to_string(), "world-main".to_string())
+            .await;
+
+        hub.set_player_focus(&player.player_id, Some("sphere-template-root-1".to_string()))
+            .await;
+        assert_eq!(
+            hub.player_focus_sphere_id(&player.player_id).await,
+            Some("sphere-template-root-1".to_string())
+        );
+
+        let updated = hub
+            .update_player_with_focus(
+                &player.player_id,
+                [1.0, 2.0, 3.0],
+                0.1,
+                0.2,
+                1,
+                None,
+                None,
+            )
+            .await;
+        assert!(matches!(updated, PlayerInputEnqueueResult::Queued));
+        hub.process_queued_inputs().await;
+
+        assert_eq!(hub.player_focus_sphere_id(&player.player_id).await, None);
     }
 
     #[test]

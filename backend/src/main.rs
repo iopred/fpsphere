@@ -11,11 +11,12 @@ use axum::{Json, Router};
 use aoi::AoiPolicy;
 use multiplayer::{
     build_snapshot_delta, filter_snapshot_players_for_observer, snapshot_players_by_id,
-    ClientMultiplayerMessage, MultiplayerHub, MultiplayerPlayerSnapshot, PlayerInputEnqueueResult,
-    ServerMultiplayerMessage,
+    ClientMultiplayerMessage, MultiplayerHub,
+    MultiplayerPlayerSnapshot, PlayerInputEnqueueResult, ServerMultiplayerMessage,
 };
 use protocol::{
-    example_world_snapshot, CommitFailure, CommitRequest, CommitResponse, CommitTarget,
+    example_world_snapshot, CommitFailure, CommitOperation, CommitRequest, CommitResponse,
+    CommitTarget,
     TemporalWorldQuery, WorldMutationFailure, WorldRepository, WorldSnapshot,
 };
 use serde::{Deserialize, Serialize};
@@ -60,6 +61,15 @@ struct CommitErrorResponse {
     validation_errors: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct CommitRequestEnvelope {
+    user_id: String,
+    base_tick: u64,
+    operations: Vec<CommitOperation>,
+    #[serde(default)]
+    focus_sphere_id: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct WorldListResponse {
     world_ids: Vec<String>,
@@ -85,6 +95,18 @@ struct SessionSnapshotBaseline {
     server_tick: u64,
     players_by_id: HashMap<String, MultiplayerPlayerSnapshot>,
     delta_frames_since_full: u32,
+}
+
+struct SessionMessageUpdate {
+    updated_user_id: Option<String>,
+    updated_focus_sphere_id: Option<String>,
+}
+
+fn should_deliver_master_world_commit_for_focus(
+    session_focus_sphere_id: Option<&str>,
+    commit_focus_sphere_id: Option<&str>,
+) -> bool {
+    session_focus_sphere_id == commit_focus_sphere_id
 }
 
 #[tokio::main]
@@ -223,7 +245,7 @@ async fn get_world_snapshot(
 async fn commit_world(
     Path(world_id): Path<String>,
     State(state): State<AppState>,
-    Json(request): Json<CommitRequest>,
+    Json(request): Json<CommitRequestEnvelope>,
 ) -> Result<Json<CommitResponse>, (StatusCode, Json<CommitErrorResponse>)> {
     if request.user_id.trim().is_empty() {
         return Err((
@@ -247,10 +269,15 @@ async fn commit_world(
         ));
     }
 
+    let commit_request = CommitRequest {
+        user_id: request.user_id.clone(),
+        base_tick: request.base_tick,
+        operations: request.operations.clone(),
+    };
     let request_user_id = request.user_id.clone();
     let response = {
         let mut repository = state.repository.write().await;
-        repository.commit(&world_id, request)
+        repository.commit(&world_id, commit_request)
     };
 
     match response {
@@ -265,6 +292,7 @@ async fn commit_world(
                 commit_response.commit_id.clone(),
                 saved_to,
                 user_scope,
+                request.focus_sphere_id.clone(),
                 commit_response.world.clone(),
             );
 
@@ -338,6 +366,7 @@ async fn handle_ws_connection(
 ) {
     let mut rx = state.multiplayer.subscribe();
     let mut session_user_id = user_id;
+    let mut session_focus_sphere_id: Option<String> = None;
     let mut snapshot_baseline: Option<SessionSnapshotBaseline> = None;
     let player = state
         .multiplayer
@@ -370,8 +399,11 @@ async fn handle_ws_connection(
                                 )
                                 .await
                                 {
-                                    Ok(Some(updated_user_id)) => {
-                                        session_user_id = updated_user_id;
+                                    Ok(Some(update)) => {
+                                        if let Some(updated_user_id) = update.updated_user_id {
+                                            session_user_id = updated_user_id;
+                                        }
+                                        session_focus_sphere_id = update.updated_focus_sphere_id;
                                     }
                                     Ok(None) => {}
                                     Err(()) => break,
@@ -400,6 +432,13 @@ async fn handle_ws_connection(
                                 player.player_id.as_str(),
                                 AoiPolicy::default(),
                             );
+                            let filtered_players = state
+                                .multiplayer
+                                .filter_snapshot_players_for_observer_focus_context(
+                                    &filtered_players,
+                                    player.player_id.as_str(),
+                                )
+                                .await;
                             let next_players_by_id = snapshot_players_by_id(&filtered_players);
                             let should_force_full = snapshot_baseline
                                 .as_ref()
@@ -454,13 +493,23 @@ async fn handle_ws_connection(
                             });
                         }
                     }
-                    Ok(ServerMultiplayerMessage::WorldCommitApplied { world_id: commit_world_id, commit_id, saved_to, user_id: target_user_id, world }) => {
+                    Ok(ServerMultiplayerMessage::WorldCommitApplied {
+                        world_id: commit_world_id,
+                        commit_id,
+                        saved_to,
+                        user_id: target_user_id,
+                        focus_sphere_id: commit_focus_sphere_id,
+                        world,
+                    }) => {
                         if commit_world_id != world_id {
                             continue;
                         }
 
                         let should_deliver = match saved_to {
-                            CommitTarget::Master => true,
+                            CommitTarget::Master => should_deliver_master_world_commit_for_focus(
+                                session_focus_sphere_id.as_deref(),
+                                commit_focus_sphere_id.as_deref(),
+                            ),
                             CommitTarget::User => {
                                 target_user_id
                                     .as_deref()
@@ -478,6 +527,7 @@ async fn handle_ws_connection(
                             commit_id,
                             saved_to,
                             user_id: target_user_id,
+                            focus_sphere_id: commit_focus_sphere_id,
                             world,
                         };
                         if send_ws_message(&mut socket, &message).await.is_err() {
@@ -505,7 +555,7 @@ async fn handle_client_message(
     player_id: &str,
     world_id: &str,
     text: &str,
-) -> Result<Option<String>, ()> {
+) -> Result<Option<SessionMessageUpdate>, ()> {
     let parsed = serde_json::from_str::<ClientMultiplayerMessage>(text);
     let message = match parsed {
         Ok(value) => value,
@@ -523,6 +573,7 @@ async fn handle_client_message(
             user_id,
             world_id: requested_world_id,
             avatar_id,
+            focus_sphere_id,
         } => {
             if let Some(requested_world) = requested_world_id {
                 if requested_world != world_id {
@@ -549,7 +600,14 @@ async fn handle_client_message(
                 .multiplayer
                 .set_player_avatar(player_id, avatar_id)
                 .await;
-            return Ok(normalized_user_id);
+            state
+                .multiplayer
+                .set_player_focus(player_id, focus_sphere_id.clone())
+                .await;
+            return Ok(Some(SessionMessageUpdate {
+                updated_user_id: normalized_user_id,
+                updated_focus_sphere_id: focus_sphere_id,
+            }));
         }
         ClientMultiplayerMessage::PlayerUpdate {
             position_3d,
@@ -557,10 +615,19 @@ async fn handle_client_message(
             pitch,
             client_tick,
             avatar_id,
+            focus_sphere_id,
         } => {
             let update_result = state
                 .multiplayer
-                .update_player(player_id, position_3d, yaw, pitch, client_tick, avatar_id)
+                .update_player_with_focus(
+                    player_id,
+                    position_3d,
+                    yaw,
+                    pitch,
+                    client_tick,
+                    avatar_id,
+                    focus_sphere_id.clone(),
+                )
                 .await;
 
             if matches!(update_result, PlayerInputEnqueueResult::PlayerMissing) {
@@ -569,6 +636,10 @@ async fn handle_client_message(
                 };
                 send_ws_message(socket, &warning).await?;
             }
+            return Ok(Some(SessionMessageUpdate {
+                updated_user_id: None,
+                updated_focus_sphere_id: focus_sphere_id,
+            }));
         }
         ClientMultiplayerMessage::Ping => {
             send_ws_message(socket, &ServerMultiplayerMessage::Pong).await?;
@@ -587,4 +658,33 @@ async fn send_ws_message(
         .send(Message::Text(payload.into()))
         .await
         .map_err(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_deliver_master_world_commit_for_focus;
+
+    #[test]
+    fn master_world_commit_delivery_respects_focus_context() {
+        assert!(should_deliver_master_world_commit_for_focus(
+            Some("sphere-template-root-1"),
+            Some("sphere-template-root-1"),
+        ));
+        assert!(!should_deliver_master_world_commit_for_focus(
+            Some("sphere-template-root-1"),
+            Some("sphere-template-root-2"),
+        ));
+        assert!(!should_deliver_master_world_commit_for_focus(
+            Some("sphere-template-root-1"),
+            None,
+        ));
+        assert!(!should_deliver_master_world_commit_for_focus(
+            None,
+            Some("sphere-template-root-1"),
+        ));
+        assert!(should_deliver_master_world_commit_for_focus(
+            None,
+            None,
+        ));
+    }
 }

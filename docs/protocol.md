@@ -147,11 +147,13 @@ Client -> server:
   "type": "hello",
   "user_id": "user-123",
   "world_id": "world-main",
-  "avatar_id": "human"
+  "avatar_id": "human",
+  "focus_sphere_id": "sphere-template-root-1"
 }
 ```
   - `avatar_id` is optional; supported values are `duck` and `human`.
   - When present, the backend applies it immediately for that player session.
+  - `focus_sphere_id` is optional; when set, the session is treated as template-focused for update suppression policy.
 - `player_update`:
 ```json
 {
@@ -160,11 +162,13 @@ Client -> server:
   "yaw": 0.2,
   "pitch": -0.1,
   "client_tick": 42,
-  "avatar_id": "duck"
+  "avatar_id": "duck",
+  "focus_sphere_id": null
 }
 ```
   - `client_tick` is the client's monotonically increasing input sequence.
   - `avatar_id` is optional; supported values are `duck` and `human`.
+  - `focus_sphere_id` is optional; use `null` to clear focus when leaving template edit context.
 
 Server -> client:
 - `welcome`:
@@ -222,6 +226,7 @@ Server -> client:
   "commit_id": "master-12",
   "saved_to": "master",
   "user_id": null,
+  "focus_sphere_id": null,
   "world": {
     "world_id": "world-main",
     "tick": 12,
@@ -233,7 +238,10 @@ Server -> client:
 Delivery semantics:
 - `state_snapshot` is sent as the baseline frame and periodically re-sent as fallback/rebase.
 - `state_snapshot_delta` is sent between baseline frames and applies against `baseline_server_tick`.
-- `saved_to = master`: delivered to all clients connected to the same `world_id`.
+- `state_snapshot`/delta streams are partitioned by focus context:
+  - no focus (`focus_sphere_id = null`) receives only no-focus players.
+  - focused sessions (`focus_sphere_id = <template-root-id>`) receive only players in that same focus context.
+- `saved_to = master`: delivered only when session focus context matches commit focus context (`null == null` for main world, or same template root id).
 - `saved_to = user`: delivered only to connections for that same `user_id` and `world_id`.
 
 ## Contract alignment

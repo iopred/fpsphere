@@ -225,6 +225,7 @@ describe("worldApi", () => {
       const body = JSON.parse(String(init?.body));
       expect(body.user_id).toBe("user-1");
       expect(body.base_tick).toBe(4);
+      expect(body.focus_sphere_id).toBe("sphere-template-root-1");
       expect(body.operations).toHaveLength(4);
       expect(body.operations[0].type).toBe("create");
       expect(body.operations[1].type).toBe("delete");
@@ -311,6 +312,7 @@ describe("worldApi", () => {
       userId: "user-1",
       baseTick: 4,
       operations,
+      focusSphereId: "sphere-template-root-1",
     });
 
     expect(result.savedTo).toBe("master");

@@ -74,6 +74,7 @@ interface PlayerUpdateMessage {
   pitch: number;
   client_tick: number;
   avatar_id?: string;
+  focus_sphere_id?: string | null;
 }
 
 interface HelloMessage {
@@ -81,6 +82,7 @@ interface HelloMessage {
   user_id: string;
   world_id: string;
   avatar_id?: string;
+  focus_sphere_id?: string | null;
 }
 
 interface PingMessage {
@@ -101,6 +103,7 @@ export interface ConnectMultiplayerParams {
   userId: string;
   worldId: string;
   avatarId?: string;
+  focusSphereId?: string | null;
   callbacks: MultiplayerClientCallbacks;
 }
 
@@ -172,6 +175,7 @@ export class MultiplayerClient {
         user_id: this.userId,
         world_id: this.worldId,
         avatar_id: params.avatarId,
+        focus_sphere_id: params.focusSphereId ?? null,
       });
     };
 
@@ -259,6 +263,7 @@ export class MultiplayerClient {
     pitch: number,
     inputSequence: number,
     avatarId?: string,
+    focusSphereId?: string | null,
   ): void {
     this.send({
       type: "player_update",
@@ -267,6 +272,7 @@ export class MultiplayerClient {
       pitch,
       client_tick: inputSequence,
       avatar_id: avatarId,
+      focus_sphere_id: focusSphereId ?? null,
     });
   }
 
