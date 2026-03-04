@@ -2,6 +2,8 @@ import type { SphereEntity, Vector3Tuple } from "@fpsphere/shared-types";
 
 export const SUBWORLD_TEMPLATE_DIMENSION = "world_template";
 export const SUBWORLD_SCALE_DIMENSION = "world_scale";
+export const SUBWORLD_YAW_DIMENSION = "world_yaw";
+export const SUBWORLD_PITCH_DIMENSION = "world_pitch";
 export const TEMPLATE_ROOT_TAG = "template-root";
 export const TEMPLATE_DEFINITION_TAG = "template-definition";
 
@@ -114,6 +116,33 @@ function resolveScale(entity: SphereEntity, template: SubworldTemplate): number 
   return baseScale * extraScale;
 }
 
+function readRotation(entity: SphereEntity): { yaw: number; pitch: number } {
+  const yawRaw = entity.dimensions[SUBWORLD_YAW_DIMENSION];
+  const pitchRaw = entity.dimensions[SUBWORLD_PITCH_DIMENSION];
+  return {
+    yaw: Number.isFinite(yawRaw) ? yawRaw : 0,
+    pitch: Number.isFinite(pitchRaw) ? pitchRaw : 0,
+  };
+}
+
+function rotateOffset(
+  offset: Vector3Tuple,
+  rotation: { yaw: number; pitch: number },
+): Vector3Tuple {
+  const [x, y, z] = offset;
+  const cosYaw = Math.cos(rotation.yaw);
+  const sinYaw = Math.sin(rotation.yaw);
+  const yawX = x * cosYaw + z * sinYaw;
+  const yawZ = -x * sinYaw + z * cosYaw;
+
+  const cosPitch = Math.cos(rotation.pitch);
+  const sinPitch = Math.sin(rotation.pitch);
+  const pitchY = y * cosPitch - yawZ * sinPitch;
+  const pitchZ = y * sinPitch + yawZ * cosPitch;
+
+  return [yawX, pitchY, pitchZ];
+}
+
 export function instantiateSubworldChildren(hostSpheres: SphereEntity[]): SphereEntity[] {
   const derived: SphereEntity[] = [];
 
@@ -137,16 +166,25 @@ export function instantiateSubworldChildren(hostSpheres: SphereEntity[]): Sphere
     if (scale === null) {
       continue;
     }
+    const rotation = readRotation(host);
 
     for (const child of template.children) {
+      const [offsetX, offsetY, offsetZ] = rotateOffset(
+        [
+          child.position3d[0] * scale,
+          child.position3d[1] * scale,
+          child.position3d[2] * scale,
+        ],
+        rotation,
+      );
       derived.push({
         id: `${host.id}::template-${requestedTemplateId}::${child.id}`,
         parentId: host.id,
         radius: Math.max(0.05, child.radius * scale),
         position3d: [
-          host.position3d[0] + child.position3d[0] * scale,
-          host.position3d[1] + child.position3d[1] * scale,
-          host.position3d[2] + child.position3d[2] * scale,
+          host.position3d[0] + offsetX,
+          host.position3d[1] + offsetY,
+          host.position3d[2] + offsetZ,
         ],
         dimensions: { ...child.dimensions },
         timeWindow: { ...host.timeWindow },

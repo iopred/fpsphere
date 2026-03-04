@@ -18,6 +18,7 @@ export class FpsController {
   private pitch = 0;
   private jumpQueued = false;
   private connected = false;
+  private lookSuppressed = false;
 
   constructor(private readonly lockElement: HTMLElement) {}
 
@@ -54,6 +55,10 @@ export class FpsController {
     return { yaw: this.yaw, pitch: this.pitch };
   }
 
+  setLookSuppressed(suppressed: boolean): void {
+    this.lookSuppressed = suppressed;
+  }
+
   sampleInput(): MovementInput {
     if (!this.isPointerLocked()) {
       this.keys.clear();
@@ -75,6 +80,9 @@ export class FpsController {
 
   private readonly onMouseMove = (event: MouseEvent): void => {
     if (!this.isPointerLocked()) {
+      return;
+    }
+    if (this.lookSuppressed) {
       return;
     }
 

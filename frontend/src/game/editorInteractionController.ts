@@ -8,11 +8,17 @@ interface EditorOrientation {
 
 export interface EditorInteractionConfig {
   minEditRadius: number;
-  mouseWheelRadiusStep: number;
+  mouseWheelRadiusPerPixel: number;
   dragMinDistance: number;
   createBoundaryMargin: number;
   playerRadius: number;
   createDistance: number;
+  templateNoneId: number;
+  templateDimension: string;
+  templateYawDimension: string;
+  templatePitchDimension: string;
+  templatePitchLimit: number;
+  templateRotateRadiansPerPixel: number;
 }
 
 export interface EditorInteractionCallbacks {
@@ -32,6 +38,14 @@ export interface EditorInteractionCallbacks {
     sphereId: string,
     position3d: [number, number, number],
   ) => void;
+  updateSphereDimensions: (
+    sphereId: string,
+    dimensions: Record<string, number>,
+  ) => boolean;
+  onSphereDimensionsChanged: (
+    sphereId: string,
+    dimensions: Record<string, number>,
+  ) => void;
 }
 
 export interface EditorInteractionOptions {
@@ -45,6 +59,7 @@ export class EditorInteractionController {
 
   private draggingSphereId: string | null = null;
   private dragDistance: number;
+  private templateRotateHeld = false;
 
   private readonly tempForward = new THREE.Vector3();
   private readonly tempOffset = new THREE.Vector3();
@@ -61,8 +76,25 @@ export class EditorInteractionController {
     return this.draggingSphereId;
   }
 
+  get isTemplateRotationActive(): boolean {
+    if (!this.templateRotateHeld) {
+      return false;
+    }
+
+    if (!this.callbacks.isEditorMode() || !this.callbacks.isPointerLocked()) {
+      return false;
+    }
+
+    const selectedSphere = this.callbacks.getSelectedEditableSphere();
+    return this.canRotateTemplateForSphere(selectedSphere);
+  }
+
   stopDraggingSphere(): void {
     this.draggingSphereId = null;
+  }
+
+  setTemplateRotateHeld(held: boolean): void {
+    this.templateRotateHeld = held;
   }
 
   handleWheel(event: WheelEvent): void {
@@ -79,16 +111,20 @@ export class EditorInteractionController {
       return;
     }
 
-    const direction = event.deltaY < 0 ? 1 : -1;
-
     event.preventDefault();
+    const deltaPixels = this.toWheelPixels(event);
+    if (!Number.isFinite(deltaPixels) || deltaPixels === 0) {
+      return;
+    }
+
+    const radiusDelta = -deltaPixels * this.config.mouseWheelRadiusPerPixel;
     const maxRadius = Math.max(
       this.config.minEditRadius,
       this.callbacks.getParentRadius() - this.config.createBoundaryMargin - this.config.playerRadius,
     );
     const nextRadius = Math.max(
       this.config.minEditRadius,
-      Math.min(maxRadius, selectedSphere.radius + direction * this.config.mouseWheelRadiusStep),
+      Math.min(maxRadius, selectedSphere.radius + radiusDelta),
     );
     const roundedRadius = Number(nextRadius.toFixed(3));
     if (roundedRadius === selectedSphere.radius) {
@@ -161,6 +197,45 @@ export class EditorInteractionController {
 
   handleWindowBlur(): void {
     this.stopDraggingSphere();
+    this.templateRotateHeld = false;
+  }
+
+  handleMouseMove(event: MouseEvent): void {
+    if (!this.isTemplateRotationActive) {
+      return;
+    }
+
+    const selectedSphere = this.callbacks.getSelectedEditableSphere();
+    if (!this.canRotateTemplateForSphere(selectedSphere)) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const yaw = this.readFiniteDimension(selectedSphere, this.config.templateYawDimension, 0);
+    const pitch = this.readFiniteDimension(selectedSphere, this.config.templatePitchDimension, 0);
+    const nextYaw = Number(
+      (yaw - event.movementX * this.config.templateRotateRadiansPerPixel).toFixed(4),
+    );
+    const unclampedPitch = pitch - event.movementY * this.config.templateRotateRadiansPerPixel;
+    const nextPitch = Number(
+      Math.max(-this.config.templatePitchLimit, Math.min(this.config.templatePitchLimit, unclampedPitch)).toFixed(4),
+    );
+
+    if (nextYaw === yaw && nextPitch === pitch) {
+      return;
+    }
+
+    const dimensions = {
+      [this.config.templateYawDimension]: nextYaw,
+      [this.config.templatePitchDimension]: nextPitch,
+    };
+    const changed = this.callbacks.updateSphereDimensions(selectedSphere.id, dimensions);
+    if (!changed) {
+      return;
+    }
+
+    this.callbacks.onSphereDimensionsChanged(selectedSphere.id, dimensions);
   }
 
   updateDraggedSphere(orientation: EditorOrientation): void {
@@ -216,5 +291,37 @@ export class EditorInteractionController {
     }
 
     this.callbacks.onSpherePositionChanged(sphereId, nextPosition);
+  }
+
+  private canRotateTemplateForSphere(sphere: SphereEntity | null): sphere is SphereEntity {
+    if (!sphere) {
+      return false;
+    }
+
+    const rawTemplateId = sphere.dimensions[this.config.templateDimension];
+    if (!Number.isFinite(rawTemplateId)) {
+      return false;
+    }
+
+    return Math.trunc(rawTemplateId) > this.config.templateNoneId;
+  }
+
+  private readFiniteDimension(
+    sphere: SphereEntity,
+    dimension: string,
+    fallback: number,
+  ): number {
+    const value = sphere.dimensions[dimension];
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  private toWheelPixels(event: WheelEvent): number {
+    if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+      return event.deltaY * 16;
+    }
+    if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+      return event.deltaY * window.innerHeight;
+    }
+    return event.deltaY;
   }
 }

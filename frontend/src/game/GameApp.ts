@@ -17,6 +17,8 @@ import {
   TEMPLATE_ROOT_TAG,
   SUBWORLD_SCALE_DIMENSION,
   SUBWORLD_TEMPLATE_DIMENSION,
+  SUBWORLD_YAW_DIMENSION,
+  SUBWORLD_PITCH_DIMENSION,
 } from "./subworldTemplates";
 import { buildSeedWorld } from "./worldSeed";
 import {
@@ -67,8 +69,10 @@ const DEFAULT_WORLD_ID = "world-main";
 const NETWORK_SEND_INTERVAL_TICKS = 2;
 const TEMPLATE_NONE_ID = 0;
 const MIN_EDIT_RADIUS = 0.25;
-const MOUSE_WHEEL_RADIUS_STEP = 0.35;
+const MOUSE_WHEEL_RADIUS_PER_PIXEL = 0.0022;
 const DRAG_MIN_DISTANCE = 1.5;
+const TEMPLATE_ROTATE_RADIANS_PER_PIXEL = 0.0055;
+const TEMPLATE_PITCH_LIMIT_RADIANS = Math.PI * 0.495;
 const SPHERE_COLOR_RED_DIMENSION = "r";
 const SPHERE_COLOR_GREEN_DIMENSION = "g";
 const SPHERE_COLOR_BLUE_DIMENSION = "b";
@@ -113,6 +117,8 @@ export class GameApp {
     this.parentSphere.position3d[1],
     this.parentSphere.position3d[2],
   );
+  private readonly templateRotationOffset = new THREE.Vector3();
+  private readonly templateRotationEuler = new THREE.Euler(0, 0, 0, "YXZ");
 
   private readonly player: PlayerBody = {
     position: new THREE.Vector3(0, -2.5, 16),
@@ -317,11 +323,17 @@ export class GameApp {
     this.editorInteractionController = new EditorInteractionController({
       config: {
         minEditRadius: MIN_EDIT_RADIUS,
-        mouseWheelRadiusStep: MOUSE_WHEEL_RADIUS_STEP,
+        mouseWheelRadiusPerPixel: MOUSE_WHEEL_RADIUS_PER_PIXEL,
         dragMinDistance: DRAG_MIN_DISTANCE,
         createBoundaryMargin: CREATE_BOUNDARY_MARGIN,
         playerRadius: PLAYER_RADIUS,
         createDistance: CREATE_DISTANCE,
+        templateNoneId: TEMPLATE_NONE_ID,
+        templateDimension: SUBWORLD_TEMPLATE_DIMENSION,
+        templateYawDimension: SUBWORLD_YAW_DIMENSION,
+        templatePitchDimension: SUBWORLD_PITCH_DIMENSION,
+        templatePitchLimit: TEMPLATE_PITCH_LIMIT_RADIANS,
+        templateRotateRadiansPerPixel: TEMPLATE_ROTATE_RADIANS_PER_PIXEL,
       },
       callbacks: {
         isEditorMode: () => this.editorMode,
@@ -351,6 +363,16 @@ export class GameApp {
           }),
         onSpherePositionChanged: (sphereId, position3d) => {
           this.queueMoveOperation(sphereId, position3d);
+          this.refreshPendingSaveMessage();
+        },
+        updateSphereDimensions: (sphereId, dimensions) =>
+          this.worldStore.apply({
+            type: "updateSphereDimensions",
+            sphereId,
+            dimensions,
+          }),
+        onSphereDimensionsChanged: (sphereId, dimensions) => {
+          this.queueUpdateDimensionsOperation(sphereId, dimensions);
           this.refreshPendingSaveMessage();
         },
       },
@@ -386,6 +408,8 @@ export class GameApp {
     window.addEventListener("resize", this.onResize);
     document.addEventListener("pointerlockchange", this.onPointerLockChange);
     document.addEventListener("keydown", this.onKeyDown);
+    document.addEventListener("keyup", this.onKeyUp);
+    document.addEventListener("mousemove", this.onMouseMove);
     document.addEventListener("wheel", this.onWheel, { passive: false });
     document.addEventListener("mousedown", this.onMouseDown);
     document.addEventListener("mouseup", this.onMouseUp);
@@ -415,6 +439,8 @@ export class GameApp {
     window.removeEventListener("resize", this.onResize);
     document.removeEventListener("pointerlockchange", this.onPointerLockChange);
     document.removeEventListener("keydown", this.onKeyDown);
+    document.removeEventListener("keyup", this.onKeyUp);
+    document.removeEventListener("mousemove", this.onMouseMove);
     document.removeEventListener("wheel", this.onWheel);
     document.removeEventListener("mousedown", this.onMouseDown);
     document.removeEventListener("mouseup", this.onMouseUp);
@@ -818,6 +844,32 @@ export class GameApp {
     return baseScale * extraScale;
   }
 
+  private readTemplateRotationDimension(hostSphere: SphereEntity, dimension: string): number {
+    const value = hostSphere.dimensions[dimension];
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  private rotateTemplateOffsetByHost(
+    hostSphere: SphereEntity,
+    offsetX: number,
+    offsetY: number,
+    offsetZ: number,
+  ): [number, number, number] {
+    const yaw = this.readTemplateRotationDimension(hostSphere, SUBWORLD_YAW_DIMENSION);
+    const pitch = this.readTemplateRotationDimension(hostSphere, SUBWORLD_PITCH_DIMENSION);
+    if (yaw === 0 && pitch === 0) {
+      return [offsetX, offsetY, offsetZ];
+    }
+
+    this.templateRotationEuler.set(pitch, yaw, 0, "YXZ");
+    this.templateRotationOffset.set(offsetX, offsetY, offsetZ).applyEuler(this.templateRotationEuler);
+    return [
+      this.templateRotationOffset.x,
+      this.templateRotationOffset.y,
+      this.templateRotationOffset.z,
+    ];
+  }
+
   private ensureTemplateRootSphere(templateId: number): SphereEntity | null {
     const existing = this.getTemplateRootSphere(templateId);
     if (existing) {
@@ -969,15 +1021,22 @@ export class GameApp {
         const offsetX = templateChild.position3d[0] - templateRoot.position3d[0];
         const offsetY = templateChild.position3d[1] - templateRoot.position3d[1];
         const offsetZ = templateChild.position3d[2] - templateRoot.position3d[2];
+        const [rotatedOffsetX, rotatedOffsetY, rotatedOffsetZ] =
+          this.rotateTemplateOffsetByHost(
+            hostSphere,
+            offsetX * hostScale,
+            offsetY * hostScale,
+            offsetZ * hostScale,
+          );
 
         derived.push({
           id: `${hostSphere.id}::template-${templateId}::entity-${templateChild.id}`,
           parentId: hostSphere.id,
           radius: Math.max(0.05, templateChild.radius * hostScale),
           position3d: [
-            hostSphere.position3d[0] + offsetX * hostScale,
-            hostSphere.position3d[1] + offsetY * hostScale,
-            hostSphere.position3d[2] + offsetZ * hostScale,
+            hostSphere.position3d[0] + rotatedOffsetX,
+            hostSphere.position3d[1] + rotatedOffsetY,
+            hostSphere.position3d[2] + rotatedOffsetZ,
           ],
           dimensions: { ...templateChild.dimensions },
           timeWindow: { ...hostSphere.timeWindow },
@@ -1404,7 +1463,12 @@ export class GameApp {
   };
 
   private readonly onPointerLockChange = (): void => {
-    this.gameplayHudPanel.setPointerLocked(this.controller.isPointerLocked());
+    const pointerLocked = this.controller.isPointerLocked();
+    this.gameplayHudPanel.setPointerLocked(pointerLocked);
+    if (!pointerLocked) {
+      this.editorInteractionController.setTemplateRotateHeld(false);
+      this.controller.setLookSuppressed(false);
+    }
   };
 
   private isEditorHudTarget(target: EventTarget | null): boolean {
@@ -1461,10 +1525,36 @@ export class GameApp {
 
   private readonly onWindowBlur = (): void => {
     this.editorInteractionController.handleWindowBlur();
+    this.controller.setLookSuppressed(false);
   };
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
+    if (event.code === "KeyR" && !event.repeat && !event.isComposing && this.editorMode) {
+      if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable]")) {
+        return;
+      }
+
+      event.preventDefault();
+      this.editorInteractionController.setTemplateRotateHeld(true);
+      this.controller.setLookSuppressed(this.editorInteractionController.isTemplateRotationActive);
+      return;
+    }
+
     this.editorKeyboardController.handleKeyDown(event);
+  };
+
+  private readonly onKeyUp = (event: KeyboardEvent): void => {
+    if (event.code !== "KeyR") {
+      return;
+    }
+
+    this.editorInteractionController.setTemplateRotateHeld(false);
+    this.controller.setLookSuppressed(false);
+  };
+
+  private readonly onMouseMove = (event: MouseEvent): void => {
+    this.editorInteractionController.handleMouseMove(event);
+    this.controller.setLookSuppressed(this.editorInteractionController.isTemplateRotationActive);
   };
 
   private readonly animate = (): void => {
@@ -1701,6 +1791,10 @@ export class GameApp {
 
   private toggleEditorMode(): void {
     this.editorMode = !this.editorMode;
+    if (!this.editorMode) {
+      this.editorInteractionController.setTemplateRotateHeld(false);
+      this.controller.setLookSuppressed(false);
+    }
     if (this.parentMesh) {
       this.parentMesh.visible = this.editorMode;
     }
