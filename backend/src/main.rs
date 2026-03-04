@@ -2,22 +2,21 @@ mod aoi;
 mod multiplayer;
 mod protocol;
 
+use aoi::AoiPolicy;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use aoi::AoiPolicy;
 use multiplayer::{
     build_snapshot_delta, filter_snapshot_players_for_observer, snapshot_players_by_id,
-    ClientMultiplayerMessage, MultiplayerHub,
-    MultiplayerPlayerSnapshot, PlayerInputEnqueueResult, ServerMultiplayerMessage,
+    ClientMultiplayerMessage, MultiplayerHub, MultiplayerPlayerSnapshot, PlayerInputEnqueueResult,
+    ServerMultiplayerMessage,
 };
 use protocol::{
     example_world_snapshot, CommitFailure, CommitOperation, CommitRequest, CommitResponse,
-    CommitTarget,
-    TemporalWorldQuery, WorldMutationFailure, WorldRepository, WorldSnapshot,
+    CommitTarget, TemporalWorldQuery, WorldMutationFailure, WorldRepository, WorldSnapshot,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -52,6 +51,7 @@ struct GetWorldQuery {
 struct WsQuery {
     user_id: Option<String>,
     world_id: Option<String>,
+    visibility_mode: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -100,6 +100,14 @@ struct SessionSnapshotBaseline {
 struct SessionMessageUpdate {
     updated_user_id: Option<String>,
     updated_focus_sphere_id: Option<String>,
+}
+
+fn visible_to_others_from_mode(raw_mode: Option<&str>) -> bool {
+    let Some(mode) = raw_mode.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+
+    !mode.eq_ignore_ascii_case("hidden")
 }
 
 fn should_deliver_master_world_commit_for_focus(
@@ -354,8 +362,11 @@ async fn ws_handler(
 ) -> impl IntoResponse {
     let user_id = query.user_id.unwrap_or_else(|| "anon".to_string());
     let world_id = query.world_id.unwrap_or_else(|| "world-main".to_string());
+    let visible_to_others = visible_to_others_from_mode(query.visibility_mode.as_deref());
 
-    ws.on_upgrade(move |socket| handle_ws_connection(socket, state, user_id, world_id))
+    ws.on_upgrade(move |socket| {
+        handle_ws_connection(socket, state, user_id, world_id, visible_to_others)
+    })
 }
 
 async fn handle_ws_connection(
@@ -363,6 +374,7 @@ async fn handle_ws_connection(
     state: AppState,
     user_id: String,
     world_id: String,
+    visible_to_others: bool,
 ) {
     let mut rx = state.multiplayer.subscribe();
     let mut session_user_id = user_id;
@@ -370,7 +382,7 @@ async fn handle_ws_connection(
     let mut snapshot_baseline: Option<SessionSnapshotBaseline> = None;
     let player = state
         .multiplayer
-        .add_player(session_user_id.clone(), world_id.clone())
+        .add_player_with_visibility(session_user_id.clone(), world_id.clone(), visible_to_others)
         .await;
 
     let welcome = ServerMultiplayerMessage::Welcome {
@@ -435,6 +447,13 @@ async fn handle_ws_connection(
                             let filtered_players = state
                                 .multiplayer
                                 .filter_snapshot_players_for_observer_focus_context(
+                                    &filtered_players,
+                                    player.player_id.as_str(),
+                                )
+                                .await;
+                            let filtered_players = state
+                                .multiplayer
+                                .filter_snapshot_players_for_observer_visibility(
                                     &filtered_players,
                                     player.player_id.as_str(),
                                 )
@@ -662,7 +681,7 @@ async fn send_ws_message(
 
 #[cfg(test)]
 mod tests {
-    use super::should_deliver_master_world_commit_for_focus;
+    use super::{should_deliver_master_world_commit_for_focus, visible_to_others_from_mode};
 
     #[test]
     fn master_world_commit_delivery_respects_focus_context() {
@@ -682,9 +701,15 @@ mod tests {
             None,
             Some("sphere-template-root-1"),
         ));
-        assert!(should_deliver_master_world_commit_for_focus(
-            None,
-            None,
-        ));
+        assert!(should_deliver_master_world_commit_for_focus(None, None,));
+    }
+
+    #[test]
+    fn visibility_mode_hidden_maps_to_not_visible() {
+        assert!(visible_to_others_from_mode(None));
+        assert!(visible_to_others_from_mode(Some("visible")));
+        assert!(!visible_to_others_from_mode(Some("hidden")));
+        assert!(!visible_to_others_from_mode(Some("  hidden  ")));
+        assert!(visible_to_others_from_mode(Some("unknown")));
     }
 }

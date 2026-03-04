@@ -784,6 +784,7 @@ export class FpsphereArApp {
     this.multiplayerClient.connect({
       userId: this.userId,
       worldId,
+      visibilityMode: "hidden",
       callbacks: {
         onStatus: (status) => {
           if (status === "disconnected") {

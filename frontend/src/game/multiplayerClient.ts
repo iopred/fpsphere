@@ -104,6 +104,7 @@ export interface ConnectMultiplayerParams {
   worldId: string;
   avatarId?: string;
   focusSphereId?: string | null;
+  visibilityMode?: "visible" | "hidden";
   callbacks: MultiplayerClientCallbacks;
 }
 
@@ -158,7 +159,14 @@ export class MultiplayerClient {
     this.lastSnapshotBaseline = null;
 
     const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-    const url = `${scheme}://${window.location.host}/ws?user_id=${encodeURIComponent(params.userId)}&world_id=${encodeURIComponent(params.worldId)}`;
+    const queryParams = new URLSearchParams({
+      user_id: params.userId,
+      world_id: params.worldId,
+    });
+    if (params.visibilityMode) {
+      queryParams.set("visibility_mode", params.visibilityMode);
+    }
+    const url = `${scheme}://${window.location.host}/ws?${queryParams.toString()}`;
 
     const socket = new WebSocket(url);
     this.socket = socket;

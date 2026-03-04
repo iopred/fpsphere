@@ -61,6 +61,7 @@ pub struct MultiplayerPlayerState {
     pub pitch: f32,
     pub avatar_id: String,
     pub focus_sphere_id: Option<String>,
+    pub visible_to_others: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,10 +83,7 @@ pub struct MultiplayerSnapshotDelta {
     pub removed_player_ids: Vec<String>,
 }
 
-fn snapshots_match(
-    left: &MultiplayerPlayerSnapshot,
-    right: &MultiplayerPlayerSnapshot,
-) -> bool {
+fn snapshots_match(left: &MultiplayerPlayerSnapshot, right: &MultiplayerPlayerSnapshot) -> bool {
     left.player_id == right.player_id
         && left.position_3d[0].to_bits() == right.position_3d[0].to_bits()
         && left.position_3d[1].to_bits() == right.position_3d[1].to_bits()
@@ -169,7 +167,10 @@ pub fn filter_snapshot_players_for_observer(
     let candidate_players = players
         .iter()
         .filter(|player| {
-            covered_keys.contains(&partition_key(player.position_3d, policy.partition_cell_edge))
+            covered_keys.contains(&partition_key(
+                player.position_3d,
+                policy.partition_cell_edge,
+            ))
         })
         .collect::<Vec<_>>();
     let mut included_ids = select_ids_in_query(
@@ -486,6 +487,19 @@ impl AuthoritativePlayerStore {
         let player = self.by_world.get(world_id)?.get(player_id)?;
         player.focus_sphere_id.clone()
     }
+
+    fn player_visible_to_others(&self, player_id: &str) -> bool {
+        let Some(world_id) = self.world_by_player_id.get(player_id) else {
+            return true;
+        };
+        let Some(world_players) = self.by_world.get(world_id) else {
+            return true;
+        };
+        world_players
+            .get(player_id)
+            .map(|player| player.visible_to_others)
+            .unwrap_or(true)
+    }
 }
 
 #[derive(Clone)]
@@ -561,7 +575,18 @@ impl MultiplayerHub {
         self.tx.subscribe()
     }
 
+    #[cfg(test)]
     pub async fn add_player(&self, user_id: String, world_id: String) -> MultiplayerPlayerState {
+        self.add_player_with_visibility(user_id, world_id, true)
+            .await
+    }
+
+    pub async fn add_player_with_visibility(
+        &self,
+        user_id: String,
+        world_id: String,
+        visible_to_others: bool,
+    ) -> MultiplayerPlayerState {
         let player_id = format!(
             "player-{}",
             self.player_seq.fetch_add(1, Ordering::SeqCst) + 1
@@ -575,6 +600,7 @@ impl MultiplayerHub {
             pitch: 0.0,
             avatar_id: DEFAULT_AVATAR_ID.to_string(),
             focus_sphere_id: None,
+            visible_to_others,
         };
 
         self.players
@@ -690,6 +716,24 @@ impl MultiplayerHub {
         )
     }
 
+    pub async fn filter_snapshot_players_for_observer_visibility(
+        &self,
+        players: &[MultiplayerPlayerSnapshot],
+        observer_player_id: &str,
+    ) -> Vec<MultiplayerPlayerSnapshot> {
+        let store = self.players.read().await;
+        let mut filtered = players
+            .iter()
+            .filter(|player| {
+                player.player_id == observer_player_id
+                    || store.player_visible_to_others(player.player_id.as_str())
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        filtered.sort_by(|a, b| a.player_id.cmp(&b.player_id));
+        filtered
+    }
+
     pub async fn remove_player(&self, player_id: &str) {
         self.players.write().await.remove_player(player_id);
     }
@@ -731,9 +775,9 @@ impl MultiplayerHub {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_snapshot_delta, filter_snapshot_players_for_observer, snapshot_players_by_id,
-        filter_snapshot_players_for_focus_context, MultiplayerHub, MultiplayerPlayerSnapshot,
-        PlayerInputEnqueueResult, ServerMultiplayerMessage,
+        build_snapshot_delta, filter_snapshot_players_for_focus_context,
+        filter_snapshot_players_for_observer, snapshot_players_by_id, MultiplayerHub,
+        MultiplayerPlayerSnapshot, PlayerInputEnqueueResult, ServerMultiplayerMessage,
     };
     use crate::aoi::AoiPolicy;
     use crate::protocol::{example_world_snapshot, CommitTarget};
@@ -1485,28 +1529,80 @@ mod tests {
             .add_player("user-focus".to_string(), "world-main".to_string())
             .await;
 
-        hub.set_player_focus(&player.player_id, Some("sphere-template-root-1".to_string()))
-            .await;
+        hub.set_player_focus(
+            &player.player_id,
+            Some("sphere-template-root-1".to_string()),
+        )
+        .await;
         assert_eq!(
             hub.player_focus_sphere_id(&player.player_id).await,
             Some("sphere-template-root-1".to_string())
         );
 
         let updated = hub
-            .update_player_with_focus(
-                &player.player_id,
-                [1.0, 2.0, 3.0],
-                0.1,
-                0.2,
-                1,
-                None,
-                None,
-            )
+            .update_player_with_focus(&player.player_id, [1.0, 2.0, 3.0], 0.1, 0.2, 1, None, None)
             .await;
         assert!(matches!(updated, PlayerInputEnqueueResult::Queued));
         hub.process_queued_inputs().await;
 
         assert_eq!(hub.player_focus_sphere_id(&player.player_id).await, None);
+    }
+
+    #[tokio::test]
+    async fn hidden_players_are_not_visible_to_other_observers() {
+        let hub = MultiplayerHub::new_without_snapshot_loop();
+        let mut rx = hub.subscribe();
+
+        let visible_player = hub
+            .add_player("user-visible".to_string(), "world-main".to_string())
+            .await;
+        let hidden_player = hub
+            .add_player_with_visibility("user-hidden".to_string(), "world-main".to_string(), false)
+            .await;
+
+        hub.broadcast_world_snapshot("world-main").await;
+
+        let snapshot_players = timeout(Duration::from_millis(200), async {
+            loop {
+                let received = rx.recv().await.expect("state snapshot message");
+                match received {
+                    ServerMultiplayerMessage::StateSnapshot {
+                        world_id, players, ..
+                    } if world_id == "world-main" => {
+                        return players;
+                    }
+                    _ => continue,
+                }
+            }
+        })
+        .await
+        .expect("expected world snapshot within timeout");
+
+        let visible_observer = hub
+            .filter_snapshot_players_for_observer_visibility(
+                &snapshot_players,
+                visible_player.player_id.as_str(),
+            )
+            .await;
+        assert!(visible_observer
+            .iter()
+            .any(|item| item.player_id == visible_player.player_id));
+        assert!(visible_observer
+            .iter()
+            .all(|item| item.player_id != hidden_player.player_id));
+
+        let hidden_observer = hub
+            .filter_snapshot_players_for_observer_visibility(
+                &snapshot_players,
+                hidden_player.player_id.as_str(),
+            )
+            .await;
+        assert!(hidden_observer
+            .iter()
+            .any(|item| item.player_id == hidden_player.player_id));
+        assert!(hidden_observer
+            .iter()
+            .any(|item| item.player_id == visible_player.player_id));
     }
 
     #[test]
@@ -1553,10 +1649,7 @@ mod tests {
         assert_eq!(delta.world_id, "world-main");
         assert_eq!(delta.server_tick, 22);
         assert_eq!(delta.baseline_server_tick, 21);
-        assert_eq!(
-            delta.removed_player_ids,
-            vec!["player-b".to_string()]
-        );
+        assert_eq!(delta.removed_player_ids, vec!["player-b".to_string()]);
         assert_eq!(delta.upsert_players.len(), 2);
         assert_eq!(delta.upsert_players[0].player_id, "player-a");
         assert_eq!(delta.upsert_players[1].player_id, "player-c");
