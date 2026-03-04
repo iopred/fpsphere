@@ -50,6 +50,7 @@ import { TemplateHudPanel } from "./templateHudPanel";
 import { GameplayHudPanel } from "./gameplayHudPanel";
 import { EditorInteractionController } from "./editorInteractionController";
 import { EditorKeyboardController } from "./editorKeyboardController";
+import { EditorActionsController } from "./editorActionsController";
 
 const FIXED_STEP_SECONDS = 1 / 60;
 const MOVE_SPEED = 18;
@@ -87,9 +88,6 @@ interface TemplatePlacementPlaybackState {
   startTick: number;
 }
 
-const tempForward = new THREE.Vector3();
-const tempOffset = new THREE.Vector3();
-const tempRaycastPoint = new THREE.Vector2(0, 0);
 const TEMPLATE_PLACEMENT_PLAYBACK_DURATION_TICKS = 42;
 const TEMPLATE_PLACEMENT_PLAYBACK_MAX_AGE_TICKS = 180;
 
@@ -102,6 +100,7 @@ export class GameApp {
   private readonly editorPanelsNode: HTMLDivElement;
   private readonly templateHudPanel: TemplateHudPanel;
   private readonly levelSelectPanel: LevelSelectPanel;
+  private readonly editorActionsController: EditorActionsController;
   private readonly editorKeyboardController: EditorKeyboardController;
 
   private readonly controller: FpsController;
@@ -132,7 +131,6 @@ export class GameApp {
     TEMPLATE_NONE_ID,
     ...getAvailableSubworldTemplateIds(),
   ];
-  private readonly raycaster = new THREE.Raycaster();
   private obstacles: ObstacleBody[] = [];
   private unsubscribeWorldStore: (() => void) | null = null;
   private accumulatorSeconds = 0;
@@ -142,7 +140,6 @@ export class GameApp {
   private editorMode = false;
   private createTemplateId = TEMPLATE_NONE_ID;
   private readonly editorInteractionController: EditorInteractionController;
-  private createdSphereCount = 0;
   private pendingCommitOperations: WorldCommitOperation[] = [];
   private readonly userId = this.getOrCreateUserId();
   private readonly levelLifecycleController: LevelLifecycleController;
@@ -258,6 +255,65 @@ export class GameApp {
     });
 
     this.controller = new FpsController(this.renderer.domElement);
+    this.editorActionsController = new EditorActionsController(
+      {
+        createdSphereRadius: CREATED_SPHERE_RADIUS,
+        minEditRadius: MIN_EDIT_RADIUS,
+        playerRadius: PLAYER_RADIUS,
+        createDistance: CREATE_DISTANCE,
+        createBoundaryMargin: CREATE_BOUNDARY_MARGIN,
+        templateNoneId: TEMPLATE_NONE_ID,
+        subworldTemplateDimension: SUBWORLD_TEMPLATE_DIMENSION,
+        subworldScaleDimension: SUBWORLD_SCALE_DIMENSION,
+      },
+      {
+        getUserId: () => this.userId,
+        getExistingSphereById: (sphereId) => this.worldStore.getSphereById(sphereId),
+        getParentSphere: () => this.parentSphere,
+        getParentCenter: () => this.parentCenter,
+        getPlayerPosition: () => this.player.position,
+        getCamera: () => this.camera,
+        getCreateTemplateId: () => this.createTemplateId,
+        getTick: () => this.tick,
+        getDefaultColorDimensions: () => this.getDefaultColorDimensions(),
+        randomMoney: () => Math.random(),
+        createSphere: (sphere, selectCreated) =>
+          this.worldStore.apply({
+            type: "createSphere",
+            selectCreated,
+            sphere,
+          }),
+        onSphereCreated: (sphere) => {
+          this.queueCreateSphereOperation(sphere);
+          this.refreshPendingSaveMessage();
+        },
+        listObstacleMeshes: () => [...this.obstacleMeshes.values()],
+        deselectSphere: () => {
+          this.worldStore.apply({ type: "deselectSphere" });
+        },
+        selectSphere: (sphereId) => {
+          this.worldStore.apply({
+            type: "selectSphere",
+            sphereId,
+          });
+        },
+        getSelectedSphereId: () => this.worldStore.getSelectedSphereId(),
+        getDraggingSphereId: () => this.editorInteractionController.currentDraggingSphereId,
+        stopDraggingSphere: () => this.stopDraggingSphere(),
+        deleteSphere: (sphereId) =>
+          this.worldStore.apply({
+            type: "deleteSphere",
+            sphereId,
+          }),
+        onSphereDeleted: (sphereId) => {
+          this.pendingCommitOperations.push({
+            type: "delete",
+            sphereId,
+          });
+          this.refreshPendingSaveMessage();
+        },
+      },
+    );
     this.editorInteractionController = new EditorInteractionController({
       config: {
         minEditRadius: MIN_EDIT_RADIUS,
@@ -273,7 +329,7 @@ export class GameApp {
         isEditorHudTarget: (target) => this.isEditorHudTarget(target),
         getSelectedSphereId: () => this.worldStore.getSelectedSphereId(),
         getSelectedEditableSphere: () => this.getSelectedEditableSphere(),
-        selectSphereAtReticle: () => this.selectSphereAtReticle(),
+        selectSphereAtReticle: () => this.editorActionsController.selectSphereAtReticle(),
         getPlayerPosition: () => this.player.position,
         getParentCenter: () => this.parentCenter,
         getParentRadius: () => this.parentSphere.radius,
@@ -309,14 +365,14 @@ export class GameApp {
         this.recolorObstacles();
       },
       toggleEditorMode: () => this.toggleEditorMode(),
-      createSphere: () => this.createSphereInFrontOfPlayer(),
+      createSphere: () => this.editorActionsController.createSphereInFrontOfPlayer(),
       deselectSphere: () => {
         this.stopDraggingSphere();
         this.worldStore.apply({ type: "deselectSphere" });
       },
-      selectSphereAtReticle: () => this.selectSphereAtReticle(),
+      selectSphereAtReticle: () => this.editorActionsController.selectSphereAtReticle(),
       enterSelectedSphereWorld: () => this.handleEnterOrExitWorldShortcut(),
-      deleteSelectedSphere: () => this.deleteSelectedSphere(),
+      deleteSelectedSphere: () => this.editorActionsController.deleteSelectedSphere(),
     });
 
     this.setupScene();
@@ -1656,145 +1712,6 @@ export class GameApp {
     this.updateTemplateHud();
     this.updateLevelSelectHud();
     this.recolorObstacles();
-  }
-
-  private nextCreatedSphereId(): string {
-    const userPrefix = this.userId.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 12) || "local";
-
-    for (let attempt = 0; attempt < 256; attempt += 1) {
-      this.createdSphereCount += 1;
-      const id = `sphere-user-${userPrefix}-${String(this.createdSphereCount).padStart(4, "0")}`;
-      if (!this.worldStore.getSphereById(id)) {
-        return id;
-      }
-    }
-
-    return `sphere-user-${userPrefix}-${Date.now().toString(36)}`;
-  }
-
-  private createSphereInFrontOfPlayer(): void {
-    const id = this.nextCreatedSphereId();
-    this.camera.getWorldDirection(tempForward);
-
-    const createdSphereRadius = Number(
-      Math.min(
-        CREATED_SPHERE_RADIUS,
-        Math.max(MIN_EDIT_RADIUS * 2, this.parentSphere.radius * 0.12),
-      ).toFixed(3),
-    );
-    const minimumCreateDistance = PLAYER_RADIUS + createdSphereRadius + 0.8;
-    const createDistance = Math.min(
-      CREATE_DISTANCE,
-      Math.max(minimumCreateDistance, this.parentSphere.radius * 0.42),
-    );
-
-    const center = this.player.position
-      .clone()
-      .addScaledVector(tempForward.normalize(), createDistance);
-
-    tempOffset.copy(center).sub(this.parentCenter);
-    const distanceFromCenter = tempOffset.length();
-    const maxDistance = this.parentSphere.radius - createdSphereRadius - CREATE_BOUNDARY_MARGIN;
-    if (distanceFromCenter > maxDistance) {
-      if (distanceFromCenter > 1e-6) {
-        center.copy(this.parentCenter).addScaledVector(tempOffset.normalize(), maxDistance);
-      } else {
-        center.copy(this.parentCenter).add(new THREE.Vector3(0, 0, maxDistance));
-      }
-    }
-
-    const dimensions: Record<string, number> = {
-      money: Math.random(),
-      [SUBWORLD_TEMPLATE_DIMENSION]: this.createTemplateId,
-      ...this.getDefaultColorDimensions(),
-    };
-    if (this.createTemplateId > TEMPLATE_NONE_ID) {
-      dimensions[SUBWORLD_SCALE_DIMENSION] = 1;
-    }
-
-    const tags = ["user-created"];
-    if (this.createTemplateId > TEMPLATE_NONE_ID) {
-      tags.push("world-instance");
-    }
-
-    const sphere: SphereEntity = {
-      id,
-      parentId: this.parentSphere.id,
-      radius: createdSphereRadius,
-      position3d: [center.x, center.y, center.z],
-      dimensions,
-      timeWindow: {
-        start: this.tick,
-        end: null,
-      },
-      tags,
-    };
-
-    const changed = this.worldStore.apply({
-      type: "createSphere",
-      selectCreated: true,
-      sphere,
-    });
-
-    if (changed) {
-      this.queueCreateSphereOperation(sphere);
-      this.refreshPendingSaveMessage();
-    }
-  }
-
-  private selectSphereAtReticle(): void {
-    const meshes = [...this.obstacleMeshes.values()];
-    if (meshes.length === 0) {
-      this.worldStore.apply({ type: "deselectSphere" });
-      return;
-    }
-
-    this.raycaster.setFromCamera(tempRaycastPoint, this.camera);
-    const intersections = this.raycaster.intersectObjects(meshes, false);
-    if (intersections.length === 0) {
-      return;
-    }
-
-    const selectedIntersection = intersections.find((intersection) => {
-      const mesh = intersection.object as THREE.Mesh;
-      return mesh.userData.selectable !== false && typeof mesh.userData.sphereId === "string";
-    });
-    if (!selectedIntersection) {
-      return;
-    }
-
-    const selectedObject = selectedIntersection.object as THREE.Mesh;
-    const selectedId = selectedObject.userData.sphereId;
-    if (typeof selectedId === "string") {
-      this.worldStore.apply({
-        type: "selectSphere",
-        sphereId: selectedId,
-      });
-    }
-  }
-
-  private deleteSelectedSphere(): void {
-    const selectedId = this.worldStore.getSelectedSphereId();
-    if (!selectedId) {
-      return;
-    }
-
-    if (this.editorInteractionController.currentDraggingSphereId === selectedId) {
-      this.stopDraggingSphere();
-    }
-
-    const changed = this.worldStore.apply({
-      type: "deleteSphere",
-      sphereId: selectedId,
-    });
-
-    if (changed) {
-      this.pendingCommitOperations.push({
-        type: "delete",
-        sphereId: selectedId,
-      });
-      this.refreshPendingSaveMessage();
-    }
   }
 
   private updateHud(): void {
