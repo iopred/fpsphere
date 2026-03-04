@@ -34,7 +34,6 @@ import {
   MultiplayerClient,
   type MultiplayerSnapshot,
   type MultiplayerWorldCommit,
-  type RemotePlayerState,
 } from "./multiplayerClient";
 import { LocalWorldStore, type WorldStoreSnapshot } from "./worldStore";
 import {
@@ -48,6 +47,7 @@ import {
   templatePlacementPlaybackScale,
 } from "./templatePlacementPlayback";
 import { RemoteAvatarRenderSystem } from "./remoteAvatarRenderSystem";
+import { LocalPredictionReconciler } from "./localPredictionReconciler";
 
 const FIXED_STEP_SECONDS = 1 / 60;
 const MOVE_SPEED = 18;
@@ -81,14 +81,6 @@ interface SphereColorChannels {
   b: number;
 }
 
-interface PredictedInputState {
-  sequence: number;
-  simulationTick: number;
-  position3d: [number, number, number];
-  yaw: number;
-  pitch: number;
-}
-
 interface TemplatePlacementPlaybackState {
   startTick: number;
 }
@@ -98,8 +90,6 @@ const tempOffset = new THREE.Vector3();
 const tempDragTarget = new THREE.Vector3();
 const tempRaycastPoint = new THREE.Vector2(0, 0);
 const tempLookEuler = new THREE.Euler(0, 0, 0, "YXZ");
-const MAX_PENDING_PREDICTED_INPUTS = 512;
-const RECONCILE_POSITION_EPSILON = 0.0001;
 const TEMPLATE_PLACEMENT_PLAYBACK_DURATION_TICKS = 42;
 const TEMPLATE_PLACEMENT_PLAYBACK_MAX_AGE_TICKS = 180;
 
@@ -189,14 +179,11 @@ export class GameApp {
   private selectedAvatarId: AvatarId = DEFAULT_AVATAR_ID;
   private lastNetworkSendTick = 0;
   private nextInputSequence = 0;
-  private readonly pendingPredictedInputs = new Map<number, PredictedInputState>();
+  private readonly localPredictionReconciler = new LocalPredictionReconciler(this.player);
   private readonly templatePlacementPlaybackById = new Map<
     string,
     TemplatePlacementPlaybackState
   >();
-  private lastAckedInputSequence = 0;
-  private lastSnapshotServerTick = 0;
-  private lastReconciliationError = 0;
   private worldSourceState: "seed" | "loading" | "backend" | "backend-user" = "loading";
   private disposed = false;
 
@@ -1673,10 +1660,7 @@ export class GameApp {
     this.localPlayerId = null;
     this.multiplayerError = null;
     this.nextInputSequence = 0;
-    this.lastAckedInputSequence = 0;
-    this.lastSnapshotServerTick = 0;
-    this.lastReconciliationError = 0;
-    this.pendingPredictedInputs.clear();
+    this.localPredictionReconciler.reset();
     this.remoteAvatarRenderSystem.reset();
 
     this.multiplayerClient.connect({
@@ -1715,7 +1699,7 @@ export class GameApp {
       return;
     }
 
-    this.applyLocalPredictionAck(snapshot);
+    this.localPredictionReconciler.applySnapshot(snapshot, this.localPlayerId);
     this.remoteAvatarRenderSystem.applySnapshot(
       snapshot.players,
       this.localPlayerId,
@@ -1751,110 +1735,6 @@ export class GameApp {
           ? `world sync failed: ${error.message}`
           : "world sync failed: unknown error";
     }
-  }
-
-  private applyLocalPredictionAck(snapshot: MultiplayerSnapshot): void {
-    if (!this.localPlayerId) {
-      return;
-    }
-
-    this.lastSnapshotServerTick = snapshot.server_tick;
-    const localPlayer = snapshot.players.find(
-      (player) => player.player_id === this.localPlayerId,
-    );
-    if (!localPlayer) {
-      return;
-    }
-
-    const rawAck = localPlayer.last_processed_input_tick;
-    if (!Number.isFinite(rawAck) || rawAck < 0) {
-      return;
-    }
-
-    const ackSequence = Math.max(
-      this.lastAckedInputSequence,
-      Math.trunc(rawAck),
-    );
-
-    this.reconcileLocalPrediction(ackSequence, localPlayer);
-    this.lastAckedInputSequence = ackSequence;
-    this.prunePredictedInputBuffer();
-  }
-
-  private reconcileLocalPrediction(
-    ackSequence: number,
-    localPlayerSnapshot: RemotePlayerState,
-  ): void {
-    const authoritativePosition = localPlayerSnapshot.position_3d;
-    const acknowledgedPrediction = this.pendingPredictedInputs.get(ackSequence);
-
-    if (!acknowledgedPrediction) {
-      if (this.pendingPredictedInputs.size === 0) {
-        const deltaX = authoritativePosition[0] - this.player.position.x;
-        const deltaY = authoritativePosition[1] - this.player.position.y;
-        const deltaZ = authoritativePosition[2] - this.player.position.z;
-        const error = Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
-        this.lastReconciliationError = error;
-
-        if (error > RECONCILE_POSITION_EPSILON) {
-          this.player.position.set(
-            authoritativePosition[0],
-            authoritativePosition[1],
-            authoritativePosition[2],
-          );
-        }
-      }
-      return;
-    }
-
-    const deltaX = authoritativePosition[0] - acknowledgedPrediction.position3d[0];
-    const deltaY = authoritativePosition[1] - acknowledgedPrediction.position3d[1];
-    const deltaZ = authoritativePosition[2] - acknowledgedPrediction.position3d[2];
-    const error = Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
-    this.lastReconciliationError = error;
-
-    if (error <= RECONCILE_POSITION_EPSILON) {
-      return;
-    }
-
-    this.player.position.set(
-      this.player.position.x + deltaX,
-      this.player.position.y + deltaY,
-      this.player.position.z + deltaZ,
-    );
-
-    for (const [sequence, predicted] of this.pendingPredictedInputs) {
-      if (sequence <= ackSequence) {
-        continue;
-      }
-
-      predicted.position3d = [
-        predicted.position3d[0] + deltaX,
-        predicted.position3d[1] + deltaY,
-        predicted.position3d[2] + deltaZ,
-      ];
-    }
-  }
-
-  private prunePredictedInputBuffer(): void {
-    for (const sequence of [...this.pendingPredictedInputs.keys()]) {
-      if (sequence <= this.lastAckedInputSequence) {
-        this.pendingPredictedInputs.delete(sequence);
-      }
-    }
-
-    while (this.pendingPredictedInputs.size > MAX_PENDING_PREDICTED_INPUTS) {
-      const oldest = this.pendingPredictedInputs.keys().next().value;
-      if (typeof oldest !== "number") {
-        break;
-      }
-      this.pendingPredictedInputs.delete(oldest);
-    }
-  }
-
-  private recordPredictedInput(state: PredictedInputState): void {
-    this.pendingPredictedInputs.set(state.sequence, state);
-    this.prunePredictedInputBuffer();
   }
 
   private addObstacleMesh(
@@ -2236,7 +2116,7 @@ export class GameApp {
     const inputSequence = this.nextPlayerInputSequence();
 
     if (options.recordPrediction) {
-      this.recordPredictedInput({
+      this.localPredictionReconciler.recordPredictedInput({
         sequence: inputSequence,
         simulationTick: this.tick,
         position3d: [this.player.position.x, this.player.position.y, this.player.position.z],
@@ -2572,10 +2452,10 @@ export class GameApp {
       `multiplayer: ${this.multiplayerStatus}\n` +
       `player id: ${this.localPlayerId ?? "pending"}\n` +
       `remote players: ${this.remoteAvatarRenderSystem.remotePlayerCount}\n` +
-      `input seq ack: ${this.lastAckedInputSequence}\n` +
-      `pending predicted inputs: ${this.pendingPredictedInputs.size}\n` +
-      `last snapshot tick: ${this.lastSnapshotServerTick}\n` +
-      `reconcile error: ${this.lastReconciliationError.toFixed(4)}\n` +
+      `input seq ack: ${this.localPredictionReconciler.ackedInputSequence}\n` +
+      `pending predicted inputs: ${this.localPredictionReconciler.pendingPredictedInputCount}\n` +
+      `last snapshot tick: ${this.localPredictionReconciler.lastSnapshotTick}\n` +
+      `reconcile error: ${this.localPredictionReconciler.lastReconciliationErrorDistance.toFixed(4)}\n` +
       `mp error: ${this.multiplayerError ?? "none"}`;
   }
 }
