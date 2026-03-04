@@ -49,6 +49,7 @@ import {
 import { LevelSelectPanel } from "./levelSelectPanel";
 import { TemplateHudPanel } from "./templateHudPanel";
 import { GameplayHudPanel } from "./gameplayHudPanel";
+import { EditorInteractionController } from "./editorInteractionController";
 
 const FIXED_STEP_SECONDS = 1 / 60;
 const MOVE_SPEED = 18;
@@ -88,9 +89,7 @@ interface TemplatePlacementPlaybackState {
 
 const tempForward = new THREE.Vector3();
 const tempOffset = new THREE.Vector3();
-const tempDragTarget = new THREE.Vector3();
 const tempRaycastPoint = new THREE.Vector2(0, 0);
-const tempLookEuler = new THREE.Euler(0, 0, 0, "YXZ");
 const TEMPLATE_PLACEMENT_PLAYBACK_DURATION_TICKS = 42;
 const TEMPLATE_PLACEMENT_PLAYBACK_MAX_AGE_TICKS = 180;
 
@@ -141,8 +140,7 @@ export class GameApp {
   private overlayEnabled = false;
   private editorMode = false;
   private createTemplateId = TEMPLATE_NONE_ID;
-  private draggingSphereId: string | null = null;
-  private dragDistance = CREATE_DISTANCE;
+  private readonly editorInteractionController: EditorInteractionController;
   private createdSphereCount = 0;
   private pendingCommitOperations: WorldCommitOperation[] = [];
   private readonly userId = this.getOrCreateUserId();
@@ -259,6 +257,47 @@ export class GameApp {
     });
 
     this.controller = new FpsController(this.renderer.domElement);
+    this.editorInteractionController = new EditorInteractionController({
+      config: {
+        minEditRadius: MIN_EDIT_RADIUS,
+        mouseWheelRadiusStep: MOUSE_WHEEL_RADIUS_STEP,
+        dragMinDistance: DRAG_MIN_DISTANCE,
+        createBoundaryMargin: CREATE_BOUNDARY_MARGIN,
+        playerRadius: PLAYER_RADIUS,
+        createDistance: CREATE_DISTANCE,
+      },
+      callbacks: {
+        isEditorMode: () => this.editorMode,
+        isPointerLocked: () => this.controller.isPointerLocked(),
+        isEditorHudTarget: (target) => this.isEditorHudTarget(target),
+        getSelectedSphereId: () => this.worldStore.getSelectedSphereId(),
+        getSelectedEditableSphere: () => this.getSelectedEditableSphere(),
+        selectSphereAtReticle: () => this.selectSphereAtReticle(),
+        getPlayerPosition: () => this.player.position,
+        getParentCenter: () => this.parentCenter,
+        getParentRadius: () => this.parentSphere.radius,
+        updateSphereRadius: (sphereId, radius) =>
+          this.worldStore.apply({
+            type: "updateSphereRadius",
+            sphereId,
+            radius,
+          }),
+        onSphereRadiusChanged: (sphereId, radius) => {
+          this.queueUpdateRadiusOperation(sphereId, radius);
+          this.refreshPendingSaveMessage();
+        },
+        updateSpherePosition: (sphereId, position3d) =>
+          this.worldStore.apply({
+            type: "updateSpherePosition",
+            sphereId,
+            position3d,
+          }),
+        onSpherePositionChanged: (sphereId, position3d) => {
+          this.queueMoveOperation(sphereId, position3d);
+          this.refreshPendingSaveMessage();
+        },
+      },
+    });
 
     this.setupScene();
     this.unsubscribeWorldStore = this.worldStore.subscribe(this.onWorldStoreChanged);
@@ -363,9 +402,10 @@ export class GameApp {
   }
 
   private readonly onWorldStoreChanged = (snapshot: WorldStoreSnapshot): void => {
+    const draggingSphereId = this.editorInteractionController.currentDraggingSphereId;
     if (
-      this.draggingSphereId !== null &&
-      !snapshot.children.some((child) => child.id === this.draggingSphereId)
+      draggingSphereId !== null &&
+      !snapshot.children.some((child) => child.id === draggingSphereId)
     ) {
       this.stopDraggingSphere();
     }
@@ -1043,68 +1083,11 @@ export class GameApp {
   }
 
   private stopDraggingSphere(): void {
-    this.draggingSphereId = null;
+    this.editorInteractionController.stopDraggingSphere();
   }
 
   private updateDraggedSphere(orientation: { yaw: number; pitch: number }): void {
-    if (!this.editorMode || !this.draggingSphereId) {
-      return;
-    }
-
-    const sphereId = this.draggingSphereId;
-    const selectedSphereId = this.worldStore.getSelectedSphereId();
-    if (selectedSphereId !== sphereId) {
-      this.stopDraggingSphere();
-      return;
-    }
-
-    const sphere = this.worldStore.getChildSphereById(sphereId);
-    if (!sphere) {
-      this.stopDraggingSphere();
-      return;
-    }
-
-    tempLookEuler.set(orientation.pitch, orientation.yaw, 0, "YXZ");
-    tempForward.set(0, 0, -1).applyEuler(tempLookEuler).normalize();
-    tempDragTarget.copy(this.player.position).addScaledVector(tempForward, this.dragDistance);
-
-    tempOffset.copy(tempDragTarget).sub(this.parentCenter);
-    const distanceFromCenter = tempOffset.length();
-    const maxDistance = Math.max(
-      DRAG_MIN_DISTANCE,
-      this.parentSphere.radius - sphere.radius - CREATE_BOUNDARY_MARGIN,
-    );
-    if (distanceFromCenter > maxDistance) {
-      if (distanceFromCenter > 1e-6) {
-        tempDragTarget
-          .copy(this.parentCenter)
-          .addScaledVector(tempOffset.normalize(), maxDistance);
-      } else {
-        tempDragTarget.set(
-          this.parentCenter.x,
-          this.parentCenter.y,
-          this.parentCenter.z + maxDistance,
-        );
-      }
-    }
-
-    const nextPosition: [number, number, number] = [
-      Number(tempDragTarget.x.toFixed(3)),
-      Number(tempDragTarget.y.toFixed(3)),
-      Number(tempDragTarget.z.toFixed(3)),
-    ];
-
-    const changed = this.worldStore.apply({
-      type: "updateSpherePosition",
-      sphereId,
-      position3d: nextPosition,
-    });
-    if (!changed) {
-      return;
-    }
-
-    this.queueMoveOperation(sphereId, nextPosition);
-    this.refreshPendingSaveMessage();
+    this.editorInteractionController.updateDraggedSphere(orientation);
   }
 
   private syncObstaclesFromSnapshot(snapshot: WorldStoreSnapshot): void {
@@ -1414,102 +1397,23 @@ export class GameApp {
   };
 
   private readonly onWheel = (event: WheelEvent): void => {
-    if (!this.editorMode) {
-      return;
-    }
-
-    if (this.isEditorHudTarget(event.target)) {
-      return;
-    }
-
-    const selectedSphere = this.getSelectedEditableSphere();
-    if (!selectedSphere) {
-      return;
-    }
-
-    const direction = event.deltaY < 0 ? 1 : -1;
-
-    event.preventDefault();
-    const maxRadius = Math.max(
-      MIN_EDIT_RADIUS,
-      this.parentSphere.radius - CREATE_BOUNDARY_MARGIN - PLAYER_RADIUS,
-    );
-    const nextRadius = Math.max(
-      MIN_EDIT_RADIUS,
-      Math.min(maxRadius, selectedSphere.radius + direction * MOUSE_WHEEL_RADIUS_STEP),
-    );
-    const roundedRadius = Number(nextRadius.toFixed(3));
-    if (roundedRadius === selectedSphere.radius) {
-      return;
-    }
-
-    const changed = this.worldStore.apply({
-      type: "updateSphereRadius",
-      sphereId: selectedSphere.id,
-      radius: roundedRadius,
-    });
-    if (!changed) {
-      return;
-    }
-
-    this.queueUpdateRadiusOperation(selectedSphere.id, roundedRadius);
-    this.refreshPendingSaveMessage();
+    this.editorInteractionController.handleWheel(event);
   };
 
   private readonly onMouseDown = (event: MouseEvent): void => {
-    if (!this.editorMode || event.button !== 2) {
-      return;
-    }
-
-    if (!this.controller.isPointerLocked()) {
-      return;
-    }
-
-    if (this.isEditorHudTarget(event.target)) {
-      return;
-    }
-
-    if (!this.worldStore.getSelectedSphereId()) {
-      this.selectSphereAtReticle();
-    }
-
-    const selectedSphere = this.getSelectedEditableSphere();
-    if (!selectedSphere) {
-      this.stopDraggingSphere();
-      return;
-    }
-
-    event.preventDefault();
-    this.draggingSphereId = selectedSphere.id;
-    tempOffset
-      .set(selectedSphere.position3d[0], selectedSphere.position3d[1], selectedSphere.position3d[2])
-      .sub(this.player.position);
-    const maxDistance = Math.max(
-      DRAG_MIN_DISTANCE,
-      this.parentSphere.radius - selectedSphere.radius - CREATE_BOUNDARY_MARGIN,
-    );
-    this.dragDistance = Math.max(
-      DRAG_MIN_DISTANCE,
-      Math.min(maxDistance, tempOffset.length()),
-    );
+    this.editorInteractionController.handleMouseDown(event);
   };
 
   private readonly onMouseUp = (event: MouseEvent): void => {
-    if (event.button !== 2) {
-      return;
-    }
-
-    this.stopDraggingSphere();
+    this.editorInteractionController.handleMouseUp(event);
   };
 
   private readonly onContextMenu = (event: MouseEvent): void => {
-    if (this.editorMode && this.controller.isPointerLocked()) {
-      event.preventDefault();
-    }
+    this.editorInteractionController.handleContextMenu(event);
   };
 
   private readonly onWindowBlur = (): void => {
-    this.stopDraggingSphere();
+    this.editorInteractionController.handleWindowBlur();
   };
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
@@ -1943,7 +1847,7 @@ export class GameApp {
       return;
     }
 
-    if (this.draggingSphereId === selectedId) {
+    if (this.editorInteractionController.currentDraggingSphereId === selectedId) {
       this.stopDraggingSphere();
     }
 
@@ -1970,7 +1874,7 @@ export class GameApp {
       playerGrounded: this.player.grounded,
       lastCollisionCount: this.lastCollisionCount,
       overlayEnabled: this.overlayEnabled,
-      draggingSphereId: this.draggingSphereId,
+      draggingSphereId: this.editorInteractionController.currentDraggingSphereId,
       createTemplateId: this.createTemplateId,
       selectedAvatarId: this.selectedAvatarId,
       selectedSphereId: this.worldStore.getSelectedSphereId(),
