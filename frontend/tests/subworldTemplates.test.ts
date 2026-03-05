@@ -6,7 +6,7 @@ import {
   SUBWORLD_SCALE_DIMENSION,
   SUBWORLD_TEMPLATE_DIMENSION,
 } from "../src/game/subworldTemplates";
-import { encodeLegacyTemplateInstanceWorldId } from "../src/game/worldInstanceRefs";
+import { encodeTemplateInstanceWorldId } from "../src/game/worldInstanceRefs";
 
 function hostSphere(overrides: Partial<SphereEntity> = {}): SphereEntity {
   return {
@@ -70,12 +70,12 @@ describe("subworldTemplates", () => {
     expect(resolveTemplateSeedId(999)).toBe(1);
   });
 
-  it("instantiates from legacy-template instanceWorldId when world_template dimension is absent", () => {
+  it("instantiates from world-template instanceWorldId when world_template dimension is absent", () => {
     const derived = instantiateSubworldChildren([
       hostSphere({
         id: "host-instance-world-id",
         dimensions: { money: 0.4, [SUBWORLD_SCALE_DIMENSION]: 1 },
-        instanceWorldId: encodeLegacyTemplateInstanceWorldId(1),
+        instanceWorldId: encodeTemplateInstanceWorldId(1),
       }),
     ]);
 

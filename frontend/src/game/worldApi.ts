@@ -55,7 +55,12 @@ interface BackendCommitRequest {
   user_id: string;
   base_tick: number;
   operations: BackendCommitOperation[];
-  focus_sphere_id?: string | null;
+  world_context?: BackendWorldContext | null;
+}
+
+export interface BackendWorldContext {
+  root_world_id: string;
+  instance_path: string[];
 }
 
 type BackendCommitOperation =
@@ -124,7 +129,7 @@ export interface CommitWorldParams {
   userId: string;
   baseTick: number;
   operations: WorldCommitOperation[];
-  focusSphereId?: string | null;
+  worldContext?: BackendWorldContext | null;
 }
 
 export interface CommitWorldResult {
@@ -503,7 +508,7 @@ export async function commitWorldChanges(
     user_id: params.userId,
     base_tick: params.baseTick,
     operations: params.operations.map(toBackendCommitOperation),
-    focus_sphere_id: params.focusSphereId ?? null,
+    world_context: params.worldContext ?? null,
   };
 
   const response = await fetch(

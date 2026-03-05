@@ -111,6 +111,8 @@ export class EditorActionsController {
       radius: createdSphereRadius,
       position3d: [center.x, center.y, center.z],
       dimensions,
+      instanceWorldId:
+        createTemplateId > this.config.templateNoneId ? `world-template-${createTemplateId}` : null,
       timeWindow: {
         start: this.callbacks.getTick(),
         end: null,

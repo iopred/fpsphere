@@ -61,6 +61,7 @@ const seedPayload: unknown[] = [
       world_template: 1,
       world_scale: 1,
     },
+    instanceWorldId: "world-template-1",
     timeWindow: { start: 0, end: null },
     tags: ["world-instance"],
   },

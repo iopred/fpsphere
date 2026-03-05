@@ -1,5 +1,6 @@
 import { buildSeedWorld, type SeedWorld } from "./worldSeed";
 import {
+  type BackendWorldContext,
   commitWorldChanges,
   createWorldLevel,
   deleteWorldLevel,
@@ -33,7 +34,7 @@ export interface LevelLifecycleCallbacks {
   connectMultiplayer: (worldId: string) => void;
   movePlayerToCurrentWorld: () => void;
   hydrateWorld: (world: SeedWorld) => boolean;
-  getTemplateFocusSphereId: () => string | null;
+  getWorldContext: () => BackendWorldContext | null;
 }
 
 export interface LevelLifecycleOptions {
@@ -293,7 +294,7 @@ export class LevelLifecycleController {
         userId: this.callbacks.userId,
         baseTick: this.backendWorldTick,
         operations,
-        focusSphereId: this.callbacks.getTemplateFocusSphereId(),
+        worldContext: this.callbacks.getWorldContext(),
       });
 
       this.callbacks.hydrateWorld(response.world);

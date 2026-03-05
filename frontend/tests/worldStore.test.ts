@@ -23,6 +23,7 @@ describe("LocalWorldStore", () => {
       {
         ...testSphere("sphere-hydrated-001"),
         position3d: [7, -1, 2],
+        instanceWorldId: "world-custom-001",
       },
     ];
 
@@ -34,11 +35,15 @@ describe("LocalWorldStore", () => {
     expect(changed).toBe(true);
     expect(store.listChildSpheres()).toHaveLength(1);
     expect(store.listChildSpheres()[0].id).toBe("sphere-hydrated-001");
+    expect(store.listChildSpheres()[0].instanceWorldId).toBe("world-custom-001");
   });
 
   it("creates and auto-selects a sphere", () => {
     const store = new LocalWorldStore(buildSeedWorld());
-    const sphere = testSphere("sphere-user-101");
+    const sphere: SphereEntity = {
+      ...testSphere("sphere-user-101"),
+      instanceWorldId: "world-template-7",
+    };
 
     const changed = store.apply({
       type: "createSphere",
@@ -48,6 +53,7 @@ describe("LocalWorldStore", () => {
 
     expect(changed).toBe(true);
     expect(store.listChildSpheres().some((item) => item.id === sphere.id)).toBe(true);
+    expect(store.getChildSphereById(sphere.id)?.instanceWorldId).toBe("world-template-7");
     expect(store.getSelectedSphereId()).toBe(sphere.id);
   });
 

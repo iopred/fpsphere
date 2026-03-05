@@ -21,7 +21,7 @@ import {
   planRemoteAvatarWorldSwitch,
 } from "../game/remoteAvatarLifecycle";
 import { LocalWorldStore, type WorldStoreSnapshot } from "../game/worldStore";
-import { resolveTemplateIdForLegacyCompatibility } from "../game/worldInstanceRefs";
+import { resolveTemplateIdFromEntity } from "../game/worldInstanceRefs";
 import {
   getTemplateRootSphereId,
   instantiateSubworldChildren,
@@ -968,7 +968,7 @@ export class FpsphereArApp {
   private readTemplateId(entity: SphereEntity | null): number {
     return Math.max(
       TEMPLATE_NONE_ID,
-      resolveTemplateIdForLegacyCompatibility(entity) ?? TEMPLATE_NONE_ID,
+      resolveTemplateIdFromEntity(entity) ?? TEMPLATE_NONE_ID,
     );
   }
 

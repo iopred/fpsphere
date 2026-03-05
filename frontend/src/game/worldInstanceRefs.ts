@@ -1,7 +1,7 @@
 import type { SphereEntity } from "@fpsphere/shared-types";
 
-const LEGACY_TEMPLATE_DIMENSION = "world_template";
-export const LEGACY_TEMPLATE_INSTANCE_WORLD_PREFIX = "legacy-template:";
+const TEMPLATE_DIMENSION = "world_template";
+export const TEMPLATE_INSTANCE_WORLD_PREFIX = "world-template-";
 
 function readPositiveInteger(value: number | undefined): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -16,25 +16,25 @@ function readPositiveInteger(value: number | undefined): number | null {
   return integerValue;
 }
 
-export function encodeLegacyTemplateInstanceWorldId(templateId: number): string | null {
+export function encodeTemplateInstanceWorldId(templateId: number): string | null {
   const normalizedTemplateId = readPositiveInteger(templateId);
   if (normalizedTemplateId === null) {
     return null;
   }
 
-  return `${LEGACY_TEMPLATE_INSTANCE_WORLD_PREFIX}${normalizedTemplateId}`;
+  return `${TEMPLATE_INSTANCE_WORLD_PREFIX}${normalizedTemplateId}`;
 }
 
-export function decodeLegacyTemplateIdFromInstanceWorldId(
+export function decodeTemplateIdFromInstanceWorldId(
   instanceWorldId: string | null | undefined,
 ): number | null {
   const normalized = instanceWorldId?.trim();
-  if (!normalized || !normalized.startsWith(LEGACY_TEMPLATE_INSTANCE_WORLD_PREFIX)) {
+  if (!normalized || !normalized.startsWith(TEMPLATE_INSTANCE_WORLD_PREFIX)) {
     return null;
   }
 
   const parsedTemplateId = Number.parseInt(
-    normalized.slice(LEGACY_TEMPLATE_INSTANCE_WORLD_PREFIX.length),
+    normalized.slice(TEMPLATE_INSTANCE_WORLD_PREFIX.length),
     10,
   );
   return readPositiveInteger(parsedTemplateId);
@@ -49,29 +49,29 @@ export function normalizeInstanceWorldIdForRuntime(input: {
     return directReference;
   }
 
-  const legacyTemplateId = readPositiveInteger(
-    input.dimensions?.[LEGACY_TEMPLATE_DIMENSION],
+  const templateId = readPositiveInteger(
+    input.dimensions?.[TEMPLATE_DIMENSION],
   );
-  if (legacyTemplateId === null) {
+  if (templateId === null) {
     return null;
   }
 
-  return `${LEGACY_TEMPLATE_INSTANCE_WORLD_PREFIX}${legacyTemplateId}`;
+  return `${TEMPLATE_INSTANCE_WORLD_PREFIX}${templateId}`;
 }
 
-export function resolveTemplateIdForLegacyCompatibility(
+export function resolveTemplateIdFromEntity(
   entity: Pick<SphereEntity, "instanceWorldId" | "dimensions"> | null,
 ): number | null {
   if (!entity) {
     return null;
   }
 
-  const fromInstanceReference = decodeLegacyTemplateIdFromInstanceWorldId(
+  const fromInstanceReference = decodeTemplateIdFromInstanceWorldId(
     entity.instanceWorldId,
   );
   if (fromInstanceReference !== null) {
     return fromInstanceReference;
   }
 
-  return readPositiveInteger(entity.dimensions[LEGACY_TEMPLATE_DIMENSION]);
+  return readPositiveInteger(entity.dimensions[TEMPLATE_DIMENSION]);
 }

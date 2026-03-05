@@ -61,6 +61,7 @@ function cloneSphere(entity: SphereEntity): SphereEntity {
     radius: entity.radius,
     position3d: [...entity.position3d],
     dimensions: { ...entity.dimensions },
+    instanceWorldId: entity.instanceWorldId ?? null,
     timeWindow: { ...entity.timeWindow },
     tags: [...entity.tags],
   };

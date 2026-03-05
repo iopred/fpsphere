@@ -182,6 +182,7 @@ pub struct WorldRepository {
 }
 
 impl WorldRepository {
+    #[cfg(test)]
     pub fn new(initial_world: WorldSnapshot) -> Self {
         let world_id = initial_world.world_id.clone();
         let mut masters = HashMap::new();
@@ -192,6 +193,35 @@ impl WorldRepository {
             user_worlds: HashMap::new(),
             commit_seq: 0,
         }
+    }
+
+    pub fn new_with_worlds(initial_worlds: Vec<WorldSnapshot>) -> Result<Self, String> {
+        if initial_worlds.is_empty() {
+            return Err("at least one initial world is required".to_string());
+        }
+
+        let mut masters = HashMap::new();
+        for mut world in initial_worlds {
+            let world_id = world.world_id.trim().to_string();
+            if world_id.is_empty() {
+                return Err("initial worlds contain empty world_id".to_string());
+            }
+
+            world.world_id = world_id.clone();
+            normalize_world_snapshot_runtime(&mut world);
+            if masters.insert(world_id.clone(), world).is_some() {
+                return Err(format!(
+                    "initial worlds contain duplicate world_id '{}'",
+                    world_id
+                ));
+            }
+        }
+
+        Ok(Self {
+            masters,
+            user_worlds: HashMap::new(),
+            commit_seq: 0,
+        })
     }
 
     pub fn from_persisted_state(state: PersistedWorldRepository) -> Result<Self, String> {
@@ -273,6 +303,7 @@ impl WorldRepository {
         }
     }
 
+    #[cfg(test)]
     pub fn reset_to_seed_world(&mut self, mut seed_world: WorldSnapshot) -> WorldSnapshot {
         normalize_world_snapshot_runtime(&mut seed_world);
 
@@ -283,6 +314,42 @@ impl WorldRepository {
         self.commit_seq = 0;
 
         seed_world
+    }
+
+    pub fn reset_to_seed_worlds(
+        &mut self,
+        seed_worlds: Vec<WorldSnapshot>,
+    ) -> Option<WorldSnapshot> {
+        if seed_worlds.is_empty() {
+            return None;
+        }
+
+        let mut next_masters = HashMap::<String, WorldSnapshot>::new();
+        for mut world in seed_worlds {
+            let world_id = world.world_id.trim().to_string();
+            if world_id.is_empty() {
+                continue;
+            }
+
+            world.world_id = world_id.clone();
+            normalize_world_snapshot_runtime(&mut world);
+            next_masters.insert(world_id, world);
+        }
+
+        if next_masters.is_empty() {
+            return None;
+        }
+
+        let primary_world = next_masters
+            .get("world-main")
+            .cloned()
+            .or_else(|| next_masters.values().next().cloned());
+
+        self.masters = next_masters;
+        self.user_worlds.clear();
+        self.commit_seq = 0;
+
+        primary_world
     }
 
     pub fn get_world_snapshot(
@@ -567,7 +634,7 @@ fn filter_world_snapshot_by_time_window(
 
 const WORLD_TEMPLATE_DIMENSION: &str = "world_template";
 const TEMPLATE_ROOT_TAG: &str = "template-root";
-const LEGACY_TEMPLATE_INSTANCE_WORLD_PREFIX: &str = "legacy-template:";
+const TEMPLATE_INSTANCE_WORLD_PREFIX: &str = "world-template-";
 
 fn read_template_id(entity: &SphereEntity) -> Option<i32> {
     let value = *entity.dimensions.get(WORLD_TEMPLATE_DIMENSION)?;
@@ -595,7 +662,7 @@ fn normalize_instance_world_reference(entity: &mut SphereEntity) {
     }
 
     entity.instance_world_id = read_template_id(entity)
-        .map(|template_id| format!("{}{}", LEGACY_TEMPLATE_INSTANCE_WORLD_PREFIX, template_id));
+        .map(|template_id| format!("{}{}", TEMPLATE_INSTANCE_WORLD_PREFIX, template_id));
 }
 
 fn normalize_world_instance_world_references(world: &mut WorldSnapshot) {
@@ -973,7 +1040,7 @@ pub fn example_world_snapshot() -> WorldSnapshot {
                 radius: 12.0,
                 position_3d: [18.0, -2.0, 14.0],
                 dimensions: world_instance_dimensions,
-                instance_world_id: None,
+                instance_world_id: Some("world-template-1".to_string()),
                 time_window: TimeWindow {
                     start_tick: 0,
                     end_tick: None,
@@ -982,6 +1049,84 @@ pub fn example_world_snapshot() -> WorldSnapshot {
             },
         ],
     }
+}
+
+pub fn example_template_world_snapshot() -> WorldSnapshot {
+    let mut world_dimensions = BTreeMap::new();
+    world_dimensions.insert("money".to_string(), 0.0);
+
+    let mut ground_dimensions = BTreeMap::new();
+    ground_dimensions.insert("money".to_string(), 0.08);
+
+    let mut building_dimensions = BTreeMap::new();
+    building_dimensions.insert("money".to_string(), 0.7);
+
+    let mut resource_dimensions = BTreeMap::new();
+    resource_dimensions.insert("money".to_string(), 1.0);
+
+    WorldSnapshot {
+        world_id: "world-template-1".to_string(),
+        tick: 0,
+        entities: vec![
+            SphereEntity {
+                id: "sphere-template-world-001".to_string(),
+                parent_id: None,
+                radius: 12.0,
+                position_3d: [0.0, 0.0, 0.0],
+                dimensions: world_dimensions,
+                instance_world_id: None,
+                time_window: TimeWindow {
+                    start_tick: 0,
+                    end_tick: None,
+                },
+                tags: vec!["world".to_string(), "template-1".to_string()],
+            },
+            SphereEntity {
+                id: "sphere-template-ground-001".to_string(),
+                parent_id: Some("sphere-template-world-001".to_string()),
+                radius: 10.4,
+                position_3d: [0.0, -11.5, 0.0],
+                dimensions: ground_dimensions,
+                instance_world_id: None,
+                time_window: TimeWindow {
+                    start_tick: 0,
+                    end_tick: None,
+                },
+                tags: vec!["ground".to_string()],
+            },
+            SphereEntity {
+                id: "sphere-template-building-001".to_string(),
+                parent_id: Some("sphere-template-world-001".to_string()),
+                radius: 2.2,
+                position_3d: [-2.6, -1.4, -2.4],
+                dimensions: building_dimensions,
+                instance_world_id: None,
+                time_window: TimeWindow {
+                    start_tick: 0,
+                    end_tick: None,
+                },
+                tags: vec!["building".to_string()],
+            },
+            SphereEntity {
+                id: "sphere-template-resource-001".to_string(),
+                parent_id: Some("sphere-template-world-001".to_string()),
+                radius: 1.1,
+                position_3d: [2.2, -2.3, 2.9],
+                dimensions: resource_dimensions,
+                instance_world_id: None,
+                time_window: TimeWindow {
+                    start_tick: 0,
+                    end_tick: None,
+                },
+                tags: vec!["resource".to_string()],
+            },
+        ],
+    }
+}
+
+pub fn example_seed_world_snapshots() -> Vec<WorldSnapshot> {
+    let world_main = example_world_snapshot();
+    vec![world_main, example_template_world_snapshot()]
 }
 
 #[cfg(test)]
@@ -1959,7 +2104,7 @@ mod tests {
             .expect("example world instance sphere");
         assert_eq!(
             world_instance.instance_world_id.as_deref(),
-            Some("legacy-template:1")
+            Some("world-template-1")
         );
     }
 

@@ -48,6 +48,7 @@ export interface MultiplayerWorldCommit {
   commit_id: string;
   saved_to: "master" | "user";
   user_id: string | null;
+  world_context?: MultiplayerWorldContext | null;
   world: BackendWorldSnapshot;
 }
 
@@ -89,7 +90,6 @@ interface PlayerUpdateMessage {
   pitch: number;
   client_tick: number;
   avatar_id?: string;
-  focus_sphere_id?: string | null;
   world_context?: MultiplayerWorldContext | null;
 }
 
@@ -98,7 +98,6 @@ interface HelloMessage {
   user_id: string;
   world_id: string;
   avatar_id?: string;
-  focus_sphere_id?: string | null;
   world_context?: MultiplayerWorldContext | null;
 }
 
@@ -121,7 +120,6 @@ export interface ConnectMultiplayerParams {
   userId: string;
   worldId: string;
   avatarId?: string;
-  focusSphereId?: string | null;
   worldContext?: MultiplayerWorldContext | null;
   visibilityMode?: "visible" | "hidden";
   callbacks: MultiplayerClientCallbacks;
@@ -202,7 +200,6 @@ export class MultiplayerClient {
         user_id: this.userId,
         world_id: this.worldId,
         avatar_id: params.avatarId,
-        focus_sphere_id: params.focusSphereId ?? null,
         world_context: params.worldContext ?? null,
       });
     };
@@ -296,7 +293,6 @@ export class MultiplayerClient {
     pitch: number,
     inputSequence: number,
     avatarId?: string,
-    focusSphereId?: string | null,
     worldContext?: MultiplayerWorldContext | null,
   ): void {
     this.send({
@@ -306,7 +302,6 @@ export class MultiplayerClient {
       pitch,
       client_tick: inputSequence,
       avatar_id: avatarId,
-      focus_sphere_id: focusSphereId ?? null,
       world_context: worldContext ?? null,
     });
   }

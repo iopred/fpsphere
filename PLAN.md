@@ -542,7 +542,7 @@ Epic tracking:
 - [ ] `S6-C3` Ensure template/world editing isolation:
   - editors in nested world contexts do not receive unrelated outer-world entity updates.
 - [ ] `S6-C4` Add AOI world-entity metrics instrumentation and trend reporting (non-blocking for Sprint 6 signoff).
-- [ ] `S6-C5` Remove legacy `focus_sphere_id` from multiplayer protocol and runtime state after `world_context` rollout verification.
+- [x] `S6-C5` Remove legacy `focus_sphere_id` from multiplayer protocol and runtime state after `world_context` rollout verification.
 
 #### S6-D Migration + Cleanup
 

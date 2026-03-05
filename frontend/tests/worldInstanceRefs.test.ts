@@ -1,19 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
-  decodeLegacyTemplateIdFromInstanceWorldId,
-  encodeLegacyTemplateInstanceWorldId,
+  decodeTemplateIdFromInstanceWorldId,
+  encodeTemplateInstanceWorldId,
   normalizeInstanceWorldIdForRuntime,
-  resolveTemplateIdForLegacyCompatibility,
+  resolveTemplateIdFromEntity,
 } from "../src/game/worldInstanceRefs";
 
 describe("worldInstanceRefs", () => {
-  it("encodes and decodes legacy template instance world ids", () => {
-    const encoded = encodeLegacyTemplateInstanceWorldId(12);
-    expect(encoded).toBe("legacy-template:12");
-    expect(decodeLegacyTemplateIdFromInstanceWorldId(encoded)).toBe(12);
+  it("encodes and decodes template instance world ids", () => {
+    const encoded = encodeTemplateInstanceWorldId(12);
+    expect(encoded).toBe("world-template-12");
+    expect(decodeTemplateIdFromInstanceWorldId(encoded)).toBe(12);
   });
 
-  it("normalizes explicit instance world ids with precedence over legacy dimensions", () => {
+  it("normalizes explicit instance world ids with precedence over template dimensions", () => {
     const normalized = normalizeInstanceWorldIdForRuntime({
       instanceWorldId: "world-castle",
       dimensions: { world_template: 3 },
@@ -21,23 +21,23 @@ describe("worldInstanceRefs", () => {
     expect(normalized).toBe("world-castle");
   });
 
-  it("normalizes legacy template dimensions into runtime instance world id references", () => {
+  it("normalizes template dimensions into runtime instance world id references", () => {
     const normalized = normalizeInstanceWorldIdForRuntime({
       dimensions: { world_template: 2 },
     });
-    expect(normalized).toBe("legacy-template:2");
+    expect(normalized).toBe("world-template-2");
   });
 
-  it("resolves template id from instance reference before legacy dimensions", () => {
-    const resolved = resolveTemplateIdForLegacyCompatibility({
-      instanceWorldId: "legacy-template:5",
+  it("resolves template id from instance reference before template dimensions", () => {
+    const resolved = resolveTemplateIdFromEntity({
+      instanceWorldId: "world-template-5",
       dimensions: { world_template: 2 },
     });
     expect(resolved).toBe(5);
   });
 
-  it("resolves template id from legacy dimensions when no instance reference exists", () => {
-    const resolved = resolveTemplateIdForLegacyCompatibility({
+  it("resolves template id from template dimensions when no instance reference exists", () => {
+    const resolved = resolveTemplateIdFromEntity({
       instanceWorldId: null,
       dimensions: { world_template: 7 },
     });

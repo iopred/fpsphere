@@ -64,7 +64,7 @@ describe("worldApi", () => {
     expect(loaded.world.children[0].instanceWorldId).toBeNull();
   });
 
-  it("derives runtime instanceWorldId from legacy world_template when explicit reference is absent", async () => {
+  it("derives runtime instanceWorldId from world_template when explicit reference is absent", async () => {
     const payload = backendSnapshotPayload();
     payload.entities[1].dimensions = {
       money: 0.2,
@@ -80,10 +80,10 @@ describe("worldApi", () => {
     }) as typeof globalThis.fetch;
 
     const loaded = await fetchWorldSeed("world-main", "user-1");
-    expect(loaded.world.children[0].instanceWorldId).toBe("legacy-template:1");
+    expect(loaded.world.children[0].instanceWorldId).toBe("world-template-1");
   });
 
-  it("prefers explicit instance_world_id over legacy world_template fallback", async () => {
+  it("prefers explicit instance_world_id over world_template fallback", async () => {
     const payload = backendSnapshotPayload();
     payload.entities[1].dimensions = {
       money: 0.2,
@@ -265,7 +265,10 @@ describe("worldApi", () => {
       const body = JSON.parse(String(init?.body));
       expect(body.user_id).toBe("user-1");
       expect(body.base_tick).toBe(4);
-      expect(body.focus_sphere_id).toBe("sphere-template-root-1");
+      expect(body.world_context).toEqual({
+        root_world_id: "world-main",
+        instance_path: ["sphere-template-root-1"],
+      });
       expect(body.operations).toHaveLength(4);
       expect(body.operations[0].type).toBe("create");
       expect(body.operations[1].type).toBe("delete");
@@ -352,7 +355,10 @@ describe("worldApi", () => {
       userId: "user-1",
       baseTick: 4,
       operations,
-      focusSphereId: "sphere-template-root-1",
+      worldContext: {
+        root_world_id: "world-main",
+        instance_path: ["sphere-template-root-1"],
+      },
     });
 
     expect(result.savedTo).toBe("master");

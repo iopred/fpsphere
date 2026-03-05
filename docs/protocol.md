@@ -89,6 +89,10 @@
 {
   "user_id": "user-123",
   "base_tick": 7,
+  "world_context": {
+    "root_world_id": "world-main",
+    "instance_path": ["sphere-template-root-1"]
+  },
   "operations": [
     {
       "type": "create",
@@ -124,6 +128,8 @@
 }
 ```
 
+- `world_context` is optional and should be preferred when `instance_path` is non-empty.
+
 ## Commit semantics
 
 - Backend first attempts to apply commit to `master`:
@@ -134,17 +140,15 @@
 
 ## Dimension-driven world instancing
 
+- `instance_world_id` is the explicit nested-world reference field on sphere entities.
 - Sphere dimensions may include:
   - `world_template` (numeric template ID)
   - `world_scale` (optional numeric scale multiplier)
 - The backend stores these dimensions as normal sphere data.
 - The frontend expands template children client-side from these dimensions, so the server does not need to duplicate subworld child entities.
-- Transitional model note:
-  - `instance_world_id` is available on sphere entities as an explicit nested-world reference field.
-  - When `instance_world_id` is missing and legacy `world_template` is present, backend snapshot/commit payloads derive:
-    - `instance_world_id = "legacy-template:<template_id>"`.
-  - Explicit `instance_world_id` values take precedence over legacy dimension fallback.
-  - Legacy dimension-driven instancing remains supported during migration.
+- When `instance_world_id` is missing and `world_template` is present, backend/runtime normalization derives:
+  - `instance_world_id = "world-template-<template_id>"`.
+- Explicit `instance_world_id` values take precedence over template-dimension fallback.
 
 ## WebSocket multiplayer messages
 
@@ -156,7 +160,6 @@ Client -> server:
   "user_id": "user-123",
   "world_id": "world-main",
   "avatar_id": "human",
-  "focus_sphere_id": "sphere-template-root-1",
   "world_context": {
     "root_world_id": "world-main",
     "instance_path": ["sphere-template-root-1"]
@@ -165,7 +168,6 @@ Client -> server:
 ```
   - `avatar_id` is optional; supported values are `duck` and `human`.
   - When present, the backend applies it immediately for that player session.
-  - `focus_sphere_id` is optional; when set, the session is treated as template-focused for update suppression policy.
 - `player_update`:
 ```json
 {
@@ -175,19 +177,15 @@ Client -> server:
   "pitch": -0.1,
   "client_tick": 42,
   "avatar_id": "duck",
-  "focus_sphere_id": null,
   "world_context": null
 }
 ```
   - `client_tick` is the client's monotonically increasing input sequence.
   - `avatar_id` is optional; supported values are `duck` and `human`.
-  - `focus_sphere_id` is optional; use `null` to clear focus when leaving template edit context.
   - `world_context` is optional and structured as:
     - `root_world_id`: root world id for the active editing context.
     - `instance_path`: ordered instance ids from root to current nested context.
-  - Migration behavior:
-    - when `world_context` is provided and has a non-empty `instance_path`, server focus partitioning uses it.
-    - when missing/empty, server falls back to legacy `focus_sphere_id` behavior.
+  - server focus partitioning uses normalized `world_context` (`None` when missing/empty path).
 
 Server -> client:
 - `welcome`:
@@ -245,7 +243,7 @@ Server -> client:
   "commit_id": "master-12",
   "saved_to": "master",
   "user_id": null,
-  "focus_sphere_id": null,
+  "world_context": null,
   "world": {
     "world_id": "world-main",
     "tick": 12,
@@ -257,10 +255,10 @@ Server -> client:
 Delivery semantics:
 - `state_snapshot` is sent as the baseline frame and periodically re-sent as fallback/rebase.
 - `state_snapshot_delta` is sent between baseline frames and applies against `baseline_server_tick`.
-- `state_snapshot`/delta streams are partitioned by focus context:
-  - no focus (`focus_sphere_id = null`) receives only no-focus players.
-  - focused sessions (`focus_sphere_id = <template-root-id>`) receive only players in that same focus context.
-- `saved_to = master`: delivered only when session focus context matches commit focus context (`null == null` for main world, or same template root id).
+- `state_snapshot`/delta streams are partitioned by normalized `world_context` key:
+  - root context (`world_context = null` or empty path) receives only root-context players.
+  - nested contexts receive only players in the same `{root_world_id, instance_path}`.
+- `saved_to = master`: delivered only when session `world_context` matches commit `world_context`.
 - `saved_to = user`: delivered only to connections for that same `user_id` and `world_id`.
 
 ## Contract alignment

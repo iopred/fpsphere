@@ -12,12 +12,13 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use datastore::FileWorldDatastore;
 use multiplayer::{
-    build_snapshot_delta, filter_snapshot_players_for_observer, snapshot_players_by_id,
+    build_snapshot_delta, filter_snapshot_players_for_observer,
+    master_world_commit_context_matches, normalize_world_context, snapshot_players_by_id,
     ClientMultiplayerMessage, MultiplayerHub, MultiplayerPlayerSnapshot, MultiplayerWorldContext,
     PlayerInputEnqueueResult, ServerMultiplayerMessage,
 };
 use protocol::{
-    example_world_snapshot, CommitFailure, CommitOperation, CommitRequest, CommitResponse,
+    example_seed_world_snapshots, CommitFailure, CommitOperation, CommitRequest, CommitResponse,
     CommitTarget, TemporalWorldQuery, WorldMutationFailure, WorldRepository, WorldSnapshot,
 };
 use serde::{Deserialize, Serialize};
@@ -34,7 +35,7 @@ const DEFAULT_DATASTORE_PATH: &str = "data/world-repository.json";
 #[derive(Clone)]
 struct AppState {
     repository: Arc<RwLock<WorldRepository>>,
-    seed_world: WorldSnapshot,
+    seed_worlds: Vec<WorldSnapshot>,
     datastore: Arc<FileWorldDatastore>,
     multiplayer: MultiplayerHub,
 }
@@ -73,7 +74,7 @@ struct CommitRequestEnvelope {
     base_tick: u64,
     operations: Vec<CommitOperation>,
     #[serde(default)]
-    focus_sphere_id: Option<String>,
+    world_context: Option<MultiplayerWorldContext>,
 }
 
 #[derive(Debug, Serialize)]
@@ -105,7 +106,6 @@ struct SessionSnapshotBaseline {
 
 struct SessionMessageUpdate {
     updated_user_id: Option<String>,
-    updated_focus_sphere_id: Option<String>,
     updated_world_context: Option<MultiplayerWorldContext>,
 }
 
@@ -117,11 +117,11 @@ fn visible_to_others_from_mode(raw_mode: Option<&str>) -> bool {
     !mode.eq_ignore_ascii_case("hidden")
 }
 
-fn should_deliver_master_world_commit_for_focus(
-    session_focus_sphere_id: Option<&str>,
-    commit_focus_sphere_id: Option<&str>,
+fn should_deliver_master_world_commit_for_context(
+    session_world_context: Option<&MultiplayerWorldContext>,
+    commit_world_context: Option<&MultiplayerWorldContext>,
 ) -> bool {
-    session_focus_sphere_id == commit_focus_sphere_id
+    master_world_commit_context_matches(session_world_context, commit_world_context)
 }
 
 #[tokio::main]
@@ -135,16 +135,16 @@ async fn main() {
         )
         .init();
 
-    let seed_world = example_world_snapshot();
+    let seed_worlds = example_seed_world_snapshots();
     let datastore_path = std::env::var("WORLD_DATASTORE_PATH")
         .unwrap_or_else(|_| DEFAULT_DATASTORE_PATH.to_string());
     let datastore = Arc::new(FileWorldDatastore::new(datastore_path));
-    let repository = load_repository(datastore.as_ref(), seed_world.clone()).await;
+    let repository = load_repository(datastore.as_ref(), &seed_worlds).await;
     let multiplayer = MultiplayerHub::new();
 
     let app_state = AppState {
         repository: Arc::new(RwLock::new(repository)),
-        seed_world,
+        seed_worlds,
         datastore: datastore.clone(),
         multiplayer,
     };
@@ -187,7 +187,7 @@ async fn main() {
 
 async fn load_repository(
     datastore: &FileWorldDatastore,
-    seed_world: WorldSnapshot,
+    seed_worlds: &[WorldSnapshot],
 ) -> WorldRepository {
     match datastore.load().await {
         Ok(Some(state)) => match WorldRepository::from_persisted_state(state) {
@@ -200,7 +200,8 @@ async fn load_repository(
                     "invalid persisted datastore state ({}); using seed snapshot",
                     error
                 );
-                WorldRepository::new(seed_world)
+                WorldRepository::new_with_worlds(seed_worlds.to_vec())
+                    .expect("seed worlds must be valid")
             }
         },
         Ok(None) => {
@@ -208,7 +209,8 @@ async fn load_repository(
                 "no datastore file found at {}; using seed snapshot",
                 datastore.path().display()
             );
-            WorldRepository::new(seed_world)
+            WorldRepository::new_with_worlds(seed_worlds.to_vec())
+                .expect("seed worlds must be valid")
         }
         Err(error) => {
             tracing::warn!(
@@ -216,7 +218,8 @@ async fn load_repository(
                 datastore.path().display(),
                 error
             );
-            WorldRepository::new(seed_world)
+            WorldRepository::new_with_worlds(seed_worlds.to_vec())
+                .expect("seed worlds must be valid")
         }
     }
 }
@@ -237,7 +240,9 @@ async fn persist_repository_snapshot(state: &AppState) -> Result<(), String> {
 async fn reset_server_data(state: &AppState, reason: &str) {
     let world = {
         let mut repository = state.repository.write().await;
-        repository.reset_to_seed_world(state.seed_world.clone())
+        repository
+            .reset_to_seed_worlds(state.seed_worlds.clone())
+            .expect("seed worlds must include at least one world")
     };
     if let Err(error) = persist_repository_snapshot(state).await {
         tracing::error!("failed to persist reset datastore snapshot: {}", error);
@@ -445,6 +450,7 @@ async fn commit_world(
     match response {
         Ok(commit_response) => {
             let saved_to = commit_response.saved_to.clone();
+            let commit_world_context = normalize_world_context(&world_id, request.world_context);
             let user_scope = match &saved_to {
                 CommitTarget::Master => None,
                 CommitTarget::User => Some(request_user_id),
@@ -454,7 +460,7 @@ async fn commit_world(
                 commit_response.commit_id.clone(),
                 saved_to,
                 user_scope,
-                request.focus_sphere_id.clone(),
+                commit_world_context,
                 commit_response.world.clone(),
             );
             if let Err(error) = persist_repository_snapshot(&state).await {
@@ -540,7 +546,7 @@ async fn handle_ws_connection(
 ) {
     let mut rx = state.multiplayer.subscribe();
     let mut session_user_id = user_id;
-    let mut session_focus_sphere_id: Option<String> = None;
+    let mut session_world_context: Option<MultiplayerWorldContext> = None;
     let mut snapshot_baseline: Option<SessionSnapshotBaseline> = None;
     let player = state
         .multiplayer
@@ -577,8 +583,7 @@ async fn handle_ws_connection(
                                         if let Some(updated_user_id) = update.updated_user_id {
                                             session_user_id = updated_user_id;
                                         }
-                                        session_focus_sphere_id = update.updated_focus_sphere_id;
-                                        let _ = update.updated_world_context;
+                                        session_world_context = update.updated_world_context;
                                     }
                                     Ok(None) => {}
                                     Err(()) => break,
@@ -680,7 +685,7 @@ async fn handle_ws_connection(
                         commit_id,
                         saved_to,
                         user_id: target_user_id,
-                        focus_sphere_id: commit_focus_sphere_id,
+                        world_context: commit_world_context,
                         world,
                     }) => {
                         if commit_world_id != world_id {
@@ -688,9 +693,9 @@ async fn handle_ws_connection(
                         }
 
                         let should_deliver = match saved_to {
-                            CommitTarget::Master => should_deliver_master_world_commit_for_focus(
-                                session_focus_sphere_id.as_deref(),
-                                commit_focus_sphere_id.as_deref(),
+                            CommitTarget::Master => should_deliver_master_world_commit_for_context(
+                                session_world_context.as_ref(),
+                                commit_world_context.as_ref(),
                             ),
                             CommitTarget::User => {
                                 target_user_id
@@ -709,7 +714,7 @@ async fn handle_ws_connection(
                             commit_id,
                             saved_to,
                             user_id: target_user_id,
-                            focus_sphere_id: commit_focus_sphere_id,
+                            world_context: commit_world_context,
                             world,
                         };
                         if send_ws_message(&mut socket, &message).await.is_err() {
@@ -755,7 +760,6 @@ async fn handle_client_message(
             user_id,
             world_id: requested_world_id,
             avatar_id,
-            focus_sphere_id,
             world_context,
         } => {
             if let Some(requested_world) = requested_world_id {
@@ -783,14 +787,14 @@ async fn handle_client_message(
                 .multiplayer
                 .set_player_avatar(player_id, avatar_id)
                 .await;
+            let normalized_world_context = normalize_world_context(world_id, world_context);
             state
                 .multiplayer
-                .set_player_context(player_id, focus_sphere_id.clone(), world_context.clone())
+                .set_player_context(player_id, normalized_world_context.clone())
                 .await;
             return Ok(Some(SessionMessageUpdate {
                 updated_user_id: normalized_user_id,
-                updated_focus_sphere_id: focus_sphere_id,
-                updated_world_context: world_context,
+                updated_world_context: normalized_world_context,
             }));
         }
         ClientMultiplayerMessage::PlayerUpdate {
@@ -799,20 +803,19 @@ async fn handle_client_message(
             pitch,
             client_tick,
             avatar_id,
-            focus_sphere_id,
             world_context,
         } => {
+            let normalized_world_context = normalize_world_context(world_id, world_context);
             let update_result = state
                 .multiplayer
-                .update_player_with_focus_context(
+                .update_player_with_world_context(
                     player_id,
                     position_3d,
                     yaw,
                     pitch,
                     client_tick,
                     avatar_id,
-                    focus_sphere_id.clone(),
-                    world_context.clone(),
+                    normalized_world_context.clone(),
                 )
                 .await;
 
@@ -824,8 +827,7 @@ async fn handle_client_message(
             }
             return Ok(Some(SessionMessageUpdate {
                 updated_user_id: None,
-                updated_focus_sphere_id: focus_sphere_id,
-                updated_world_context: world_context,
+                updated_world_context: normalized_world_context,
             }));
         }
         ClientMultiplayerMessage::Ping => {
@@ -849,27 +851,41 @@ async fn send_ws_message(
 
 #[cfg(test)]
 mod tests {
-    use super::{should_deliver_master_world_commit_for_focus, visible_to_others_from_mode};
+    use super::{should_deliver_master_world_commit_for_context, visible_to_others_from_mode};
+    use crate::multiplayer::MultiplayerWorldContext;
 
     #[test]
     fn master_world_commit_delivery_respects_focus_context() {
-        assert!(should_deliver_master_world_commit_for_focus(
-            Some("sphere-template-root-1"),
-            Some("sphere-template-root-1"),
+        assert!(should_deliver_master_world_commit_for_context(None, None));
+
+        let context_a = MultiplayerWorldContext {
+            root_world_id: "world-main".to_string(),
+            instance_path: vec!["sphere-template-root-1".to_string()],
+        };
+        let context_a_copy = MultiplayerWorldContext {
+            root_world_id: "world-main".to_string(),
+            instance_path: vec!["sphere-template-root-1".to_string()],
+        };
+        let context_b = MultiplayerWorldContext {
+            root_world_id: "world-main".to_string(),
+            instance_path: vec!["sphere-template-root-2".to_string()],
+        };
+        assert!(should_deliver_master_world_commit_for_context(
+            Some(&context_a),
+            Some(&context_a_copy),
         ));
-        assert!(!should_deliver_master_world_commit_for_focus(
-            Some("sphere-template-root-1"),
-            Some("sphere-template-root-2"),
+        assert!(!should_deliver_master_world_commit_for_context(
+            Some(&context_a),
+            Some(&context_b),
         ));
-        assert!(!should_deliver_master_world_commit_for_focus(
-            Some("sphere-template-root-1"),
+        assert!(!should_deliver_master_world_commit_for_context(
             None,
+            Some(&context_a)
         ));
-        assert!(!should_deliver_master_world_commit_for_focus(
-            None,
-            Some("sphere-template-root-1"),
+        assert!(!should_deliver_master_world_commit_for_context(
+            Some(&context_a),
+            None
         ));
-        assert!(should_deliver_master_world_commit_for_focus(None, None,));
     }
 
     #[test]

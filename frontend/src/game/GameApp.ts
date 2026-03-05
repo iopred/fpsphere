@@ -20,8 +20,9 @@ import {
   SUBWORLD_YAW_DIMENSION,
   SUBWORLD_PITCH_DIMENSION,
 } from "./subworldTemplates";
-import { buildSeedWorld } from "./worldSeed";
+import { buildSeedWorld, type SeedWorld } from "./worldSeed";
 import {
+  fetchWorldSeed,
   parseLoadedWorldSnapshot,
   type WorldCommitOperation,
 } from "./worldApi";
@@ -55,7 +56,7 @@ import { GameplayHudPanel } from "./gameplayHudPanel";
 import { EditorInteractionController } from "./editorInteractionController";
 import { EditorKeyboardController } from "./editorKeyboardController";
 import { EditorActionsController } from "./editorActionsController";
-import { resolveTemplateIdForLegacyCompatibility } from "./worldInstanceRefs";
+import { resolveTemplateIdFromEntity } from "./worldInstanceRefs";
 
 const FIXED_STEP_SECONDS = 1 / 60;
 const MOVE_SPEED = 18;
@@ -93,6 +94,19 @@ interface SphereColorChannels {
 
 interface TemplatePlacementPlaybackState {
   startTick: number;
+}
+
+function cloneSphereEntity(entity: SphereEntity): SphereEntity {
+  return {
+    id: entity.id,
+    parentId: entity.parentId,
+    radius: entity.radius,
+    position3d: [...entity.position3d],
+    dimensions: { ...entity.dimensions },
+    instanceWorldId: entity.instanceWorldId ?? null,
+    timeWindow: { ...entity.timeWindow },
+    tags: [...entity.tags],
+  };
 }
 
 const TEMPLATE_PLACEMENT_PLAYBACK_DURATION_TICKS = 42;
@@ -140,6 +154,9 @@ export class GameApp {
     TEMPLATE_NONE_ID,
     ...getAvailableSubworldTemplateIds(),
   ];
+  private readonly worldNavigationStack: string[] = [];
+  private readonly instancedWorldById = new Map<string, SeedWorld>();
+  private readonly instancedWorldLoadInFlight = new Set<string>();
   private obstacles: ObstacleBody[] = [];
   private unsubscribeWorldStore: (() => void) | null = null;
   private accumulatorSeconds = 0;
@@ -260,7 +277,7 @@ export class GameApp {
             type: "hydrateWorld",
             world,
           }),
-        getTemplateFocusSphereId: () => this.getMultiplayerTemplateFocusSphereId(),
+        getWorldContext: () => this.getMultiplayerWorldContext(),
       },
     });
 
@@ -397,7 +414,9 @@ export class GameApp {
         this.worldStore.apply({ type: "deselectSphere" });
       },
       selectSphereAtReticle: () => this.editorActionsController.selectSphereAtReticle(),
-      enterSelectedSphereWorld: () => this.handleEnterOrExitWorldShortcut(),
+      enterSelectedSphereWorld: () => {
+        void this.handleEnterOrExitWorldShortcut();
+      },
       deleteSelectedSphere: () => this.editorActionsController.deleteSelectedSphere(),
     });
 
@@ -487,6 +506,7 @@ export class GameApp {
     this.parentMesh = parentMesh;
 
     this.syncObstaclesFromSnapshot(this.worldStore.getSnapshot());
+    this.cacheCurrentWorldDefinition();
   }
 
   private buildObstacleBody(
@@ -527,8 +547,20 @@ export class GameApp {
       this.parentMesh.scale.setScalar(this.parentSphere.radius);
     }
     this.syncObstaclesFromSnapshot(snapshot);
+    this.cacheCurrentWorldDefinition();
     this.updateTemplateHud();
   };
+
+  private cacheCurrentWorldDefinition(): void {
+    const root = this.worldStore.getRootSphere();
+    const descendants = this.worldStore
+      .listDescendantsOf(root.id)
+      .map((entity) => cloneSphereEntity(entity));
+    this.instancedWorldById.set(this.currentWorldId, {
+      parent: cloneSphereEntity(root),
+      children: descendants,
+    });
+  }
 
   private async initializeLevelSelection(): Promise<void> {
     await this.levelLifecycleController.initializeLevelSelection();
@@ -555,6 +587,9 @@ export class GameApp {
   }
 
   private async selectWorldLevel(worldIdInput: string, force: boolean = false): Promise<void> {
+    if (!force) {
+      this.worldNavigationStack.length = 0;
+    }
     await this.levelLifecycleController.selectWorldLevel(worldIdInput, force);
   }
 
@@ -622,6 +657,7 @@ export class GameApp {
         radius: sphere.radius,
         position3d: [...sphere.position3d],
         dimensions: { ...sphere.dimensions },
+        instanceWorldId: sphere.instanceWorldId ?? null,
         timeWindow: { ...sphere.timeWindow },
         tags: [...sphere.tags],
       },
@@ -796,7 +832,7 @@ export class GameApp {
   private readTemplateId(entity: SphereEntity | null): number {
     return Math.max(
       TEMPLATE_NONE_ID,
-      resolveTemplateIdForLegacyCompatibility(entity) ?? TEMPLATE_NONE_ID,
+      resolveTemplateIdFromEntity(entity) ?? TEMPLATE_NONE_ID,
     );
   }
 
@@ -804,20 +840,20 @@ export class GameApp {
     return entity.tags.includes(TEMPLATE_ROOT_TAG);
   }
 
-  private getMultiplayerTemplateFocusSphereId(): string | null {
+  private getActiveTemplateContextSphereId(): string | null {
     const activeParent = this.worldStore.getParentSphere();
     return this.isTemplateRootSphere(activeParent) ? activeParent.id : null;
   }
 
   private getMultiplayerWorldContext(): MultiplayerWorldContext | null {
-    const focusSphereId = this.getMultiplayerTemplateFocusSphereId();
-    if (!focusSphereId) {
+    const contextSphereId = this.getActiveTemplateContextSphereId();
+    if (!contextSphereId) {
       return null;
     }
 
     return {
       root_world_id: this.currentWorldId,
-      instance_path: [focusSphereId],
+      instance_path: [contextSphereId],
     };
   }
 
@@ -1067,6 +1103,99 @@ export class GameApp {
     return derived;
   }
 
+  private ensureInstancedWorldLoaded(worldIdInput: string): void {
+    const worldId = worldIdInput.trim();
+    if (worldId.length === 0 || worldId === this.currentWorldId) {
+      return;
+    }
+    if (this.instancedWorldById.has(worldId) || this.instancedWorldLoadInFlight.has(worldId)) {
+      return;
+    }
+
+    this.instancedWorldLoadInFlight.add(worldId);
+    void fetchWorldSeed(worldId, this.userId)
+      .then((loaded) => {
+        if (this.disposed) {
+          return;
+        }
+
+        this.instancedWorldById.set(worldId, {
+          parent: cloneSphereEntity(loaded.world.parent),
+          children: loaded.world.children.map((entity) => cloneSphereEntity(entity)),
+        });
+        this.syncObstaclesFromSnapshot(this.worldStore.getSnapshot());
+      })
+      .catch((error) => {
+        if (!this.disposed) {
+          console.warn(`Failed to load instanced world "${worldId}"`, error);
+        }
+      })
+      .finally(() => {
+        this.instancedWorldLoadInFlight.delete(worldId);
+      });
+  }
+
+  private instantiateReferencedWorldChildren(hostSpheres: SphereEntity[]): SphereEntity[] {
+    const derived: SphereEntity[] = [];
+
+    for (const hostSphere of hostSpheres) {
+      const referencedWorldId = hostSphere.instanceWorldId?.trim();
+      if (!referencedWorldId || referencedWorldId === this.currentWorldId) {
+        continue;
+      }
+
+      const referencedWorld = this.instancedWorldById.get(referencedWorldId);
+      if (!referencedWorld) {
+        this.ensureInstancedWorldLoaded(referencedWorldId);
+        continue;
+      }
+
+      const referencedRoot = referencedWorld.parent;
+      const hostScale = this.resolveTemplateHostScale(hostSphere, referencedRoot.radius);
+      if (hostScale <= 0) {
+        continue;
+      }
+
+      for (const referencedChild of referencedWorld.children) {
+        const offsetX = referencedChild.position3d[0] - referencedRoot.position3d[0];
+        const offsetY = referencedChild.position3d[1] - referencedRoot.position3d[1];
+        const offsetZ = referencedChild.position3d[2] - referencedRoot.position3d[2];
+        const [rotatedOffsetX, rotatedOffsetY, rotatedOffsetZ] =
+          this.rotateTemplateOffsetByHost(
+            hostSphere,
+            offsetX * hostScale,
+            offsetY * hostScale,
+            offsetZ * hostScale,
+          );
+
+        derived.push({
+          id: `${hostSphere.id}::world-${referencedWorldId}::entity-${referencedChild.id}`,
+          parentId: hostSphere.id,
+          radius: Math.max(0.05, referencedChild.radius * hostScale),
+          position3d: [
+            hostSphere.position3d[0] + rotatedOffsetX,
+            hostSphere.position3d[1] + rotatedOffsetY,
+            hostSphere.position3d[2] + rotatedOffsetZ,
+          ],
+          dimensions: { ...referencedChild.dimensions },
+          timeWindow: { ...hostSphere.timeWindow },
+          tags: [
+            ...referencedChild.tags.filter(
+              (tag) =>
+                tag !== TEMPLATE_DEFINITION_TAG &&
+                tag !== TEMPLATE_ROOT_TAG &&
+                tag !== "instanced-subworld",
+            ),
+            "instanced-subworld",
+            `world-instance-${referencedWorldId}`,
+          ],
+        });
+      }
+    }
+
+    return derived;
+  }
+
   private getCreateTemplateMaxId(): number {
     let maxTemplateId = this.templateIdChoices[this.templateIdChoices.length - 1] ?? TEMPLATE_NONE_ID;
 
@@ -1195,36 +1324,42 @@ export class GameApp {
     this.player.velocity.set(0, 0, 0);
   }
 
-  private handleEnterOrExitWorldShortcut(): void {
+  private resolveSelectedSphereTargetWorldId(selectedSphere: SphereEntity): string | null {
+    const directReference = selectedSphere.instanceWorldId?.trim();
+    if (directReference) {
+      return directReference;
+    }
+
+    const templateId = this.readTemplateId(selectedSphere);
+    if (templateId > TEMPLATE_NONE_ID) {
+      return `world-template-${templateId}`;
+    }
+
+    return null;
+  }
+
+  private async handleEnterOrExitWorldShortcut(): Promise<void> {
     const selectedSphere = this.getSelectedEditableSphere();
     if (selectedSphere) {
-      const templateId = this.readTemplateId(selectedSphere);
-      if (templateId > TEMPLATE_NONE_ID) {
-        const templateRoot = this.ensureTemplateRootSphere(templateId);
-        if (!templateRoot) {
-          return;
+      const targetWorldId = this.resolveSelectedSphereTargetWorldId(selectedSphere);
+      if (targetWorldId && targetWorldId !== this.currentWorldId) {
+        if (this.worldNavigationStack[this.worldNavigationStack.length - 1] !== this.currentWorldId) {
+          this.worldNavigationStack.push(this.currentWorldId);
         }
-        this.seedSharedTemplateDefinitionIfNeeded(templateRoot, selectedSphere);
-
-        const entered = this.worldStore.apply({
-          type: "enterSphere",
-          sphereId: templateRoot.id,
-        });
-        if (entered) {
-          this.createTemplateId = TEMPLATE_NONE_ID;
-          this.stopDraggingSphere();
-          this.movePlayerToCurrentWorld();
-          this.updateTemplateHud();
-        }
+        this.createTemplateId = TEMPLATE_NONE_ID;
+        this.stopDraggingSphere();
+        await this.selectWorldLevel(targetWorldId, true);
         return;
       }
     }
 
-    const exited = this.worldStore.apply({ type: "exitSphere" });
-    if (exited) {
-      this.stopDraggingSphere();
-      this.movePlayerToCurrentWorld();
+    const previousWorldId = this.worldNavigationStack.pop();
+    if (!previousWorldId || previousWorldId === this.currentWorldId) {
+      return;
     }
+
+    this.stopDraggingSphere();
+    await this.selectWorldLevel(previousWorldId, true);
   }
 
   private stopDraggingSphere(): void {
@@ -1272,7 +1407,14 @@ export class GameApp {
       pushExpanded(instancedChild);
     }
 
+    for (const instancedChild of this.instantiateReferencedWorldChildren(templateHosts)) {
+      pushExpanded(instancedChild);
+    }
+
     const fallbackTemplateHosts = templateHosts.filter((host) => {
+      if (host.instanceWorldId?.trim()) {
+        return false;
+      }
       const templateId = this.readTemplateId(host);
       return templateId > TEMPLATE_NONE_ID && !this.hasSharedTemplateDefinition(templateId);
     });
@@ -1287,11 +1429,13 @@ export class GameApp {
       nextIds.add(entity.id);
       const instancedSubworld = entity.tags.includes("instanced-subworld");
       const templateId = entity.dimensions[SUBWORLD_TEMPLATE_DIMENSION];
+      const hasInstanceWorldReference =
+        typeof entity.instanceWorldId === "string" && entity.instanceWorldId.trim().length > 0;
       const colorChannels = this.readSphereColorChannels(entity);
       const portalHost =
         entity.parentId === snapshot.parent.id &&
-        Number.isFinite(templateId) &&
-        Math.trunc(templateId) > TEMPLATE_NONE_ID;
+        ((Number.isFinite(templateId) && Math.trunc(templateId) > TEMPLATE_NONE_ID) ||
+          hasInstanceWorldReference);
       const selectable =
         entity.parentId === snapshot.parent.id &&
         !instancedSubworld &&
@@ -1352,7 +1496,6 @@ export class GameApp {
       userId: this.userId,
       worldId,
       avatarId: this.selectedAvatarId,
-      focusSphereId: this.getMultiplayerTemplateFocusSphereId(),
       worldContext: this.getMultiplayerWorldContext(),
       callbacks: {
         onStatus: (status) => {
@@ -1715,7 +1858,6 @@ export class GameApp {
       orientation.pitch,
       inputSequence,
       this.selectedAvatarId,
-      this.getMultiplayerTemplateFocusSphereId(),
       this.getMultiplayerWorldContext(),
     );
     this.lastNetworkSendTick = this.tick;
