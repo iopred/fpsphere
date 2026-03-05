@@ -57,6 +57,7 @@ import { EditorKeyboardController } from "./editorKeyboardController";
 import { EditorActionsController } from "./editorActionsController";
 import {
   decodeTemplateIdFromInstanceWorldId,
+  normalizeInstanceWorldIdForRuntime,
   resolveTemplateIdFromEntity,
 } from "./worldInstanceRefs";
 import { tintWorldInstanceChildDimensions } from "./worldInstanceTint";
@@ -80,6 +81,7 @@ const MOUSE_WHEEL_RADIUS_PER_PIXEL = 0.0022;
 const DRAG_MIN_DISTANCE = 1.5;
 const TEMPLATE_ROTATE_RADIANS_PER_PIXEL = 0.0055;
 const TEMPLATE_PITCH_LIMIT_RADIANS = Math.PI * 0.495;
+const WORLD_INSTANCE_RENDER_DEPTH = 2;
 const SPHERE_COLOR_RED_DIMENSION = "r";
 const SPHERE_COLOR_GREEN_DIMENSION = "g";
 const SPHERE_COLOR_BLUE_DIMENSION = "b";
@@ -1013,6 +1015,7 @@ export class GameApp {
             templateRoot.position3d[2] + (legacyChild.position3d[2] - sourceHost.position3d[2]) / hostScale,
           ],
           dimensions: { ...legacyChild.dimensions },
+          instanceWorldId: legacyChild.instanceWorldId ?? null,
           timeWindow: { ...legacyChild.timeWindow },
           tags: [
             ...legacyChild.tags.filter(
@@ -1118,6 +1121,7 @@ export class GameApp {
             hostSphere.position3d[2] + rotatedOffsetZ,
           ],
           dimensions: { ...templateChild.dimensions },
+          instanceWorldId: templateChild.instanceWorldId ?? null,
           timeWindow: { ...hostSphere.timeWindow },
           tags: [
             ...templateChild.tags.filter(
@@ -1170,73 +1174,87 @@ export class GameApp {
 
   private instantiateReferencedWorldChildren(hostSpheres: SphereEntity[]): SphereEntity[] {
     const derived: SphereEntity[] = [];
+    let hostsForDepth = [...hostSpheres];
 
-    for (const hostSphere of hostSpheres) {
-      const referencedWorldId = hostSphere.instanceWorldId?.trim();
-      if (!referencedWorldId || referencedWorldId === this.currentWorldId) {
-        continue;
+    for (let depth = 0; depth < WORLD_INSTANCE_RENDER_DEPTH; depth += 1) {
+      if (hostsForDepth.length === 0) {
+        break;
       }
 
-      const referencedWorld = this.instancedWorldById.get(referencedWorldId);
-      if (!referencedWorld) {
-        this.ensureInstancedWorldLoaded(referencedWorldId);
-        continue;
+      const nextHosts: SphereEntity[] = [];
+      for (const hostSphere of hostsForDepth) {
+        const referencedWorldId = this.resolveReferencedWorldId(hostSphere);
+        if (!referencedWorldId || referencedWorldId === this.currentWorldId) {
+          continue;
+        }
+
+        const referencedWorld = this.instancedWorldById.get(referencedWorldId);
+        if (!referencedWorld) {
+          this.ensureInstancedWorldLoaded(referencedWorldId);
+          continue;
+        }
+
+        const referencedRoot = referencedWorld.parent;
+        const hostScale = this.resolveTemplateHostScale(hostSphere, referencedRoot.radius);
+        if (hostScale <= 0) {
+          continue;
+        }
+
+        for (const referencedChild of referencedWorld.children) {
+          const offsetX = referencedChild.position3d[0] - referencedRoot.position3d[0];
+          const offsetY = referencedChild.position3d[1] - referencedRoot.position3d[1];
+          const offsetZ = referencedChild.position3d[2] - referencedRoot.position3d[2];
+          const [rotatedOffsetX, rotatedOffsetY, rotatedOffsetZ] =
+            this.rotateTemplateOffsetByHost(
+              hostSphere,
+              offsetX * hostScale,
+              offsetY * hostScale,
+              offsetZ * hostScale,
+            );
+
+          const derivedChild: SphereEntity = {
+            id: `${hostSphere.id}::world-${referencedWorldId}::entity-${referencedChild.id}`,
+            parentId: hostSphere.id,
+            radius: Math.max(0.05, referencedChild.radius * hostScale),
+            position3d: [
+              hostSphere.position3d[0] + rotatedOffsetX,
+              hostSphere.position3d[1] + rotatedOffsetY,
+              hostSphere.position3d[2] + rotatedOffsetZ,
+            ],
+            dimensions: tintWorldInstanceChildDimensions({
+              childDimensions: referencedChild.dimensions,
+              hostDimensions: hostSphere.dimensions,
+              defaultColorChannels: {
+                r: DEFAULT_SPHERE_COLOR_RED,
+                g: DEFAULT_SPHERE_COLOR_GREEN,
+                b: DEFAULT_SPHERE_COLOR_BLUE,
+              },
+              colorDimensionKeys: {
+                red: SPHERE_COLOR_RED_DIMENSION,
+                green: SPHERE_COLOR_GREEN_DIMENSION,
+                blue: SPHERE_COLOR_BLUE_DIMENSION,
+              },
+            }),
+            instanceWorldId: referencedChild.instanceWorldId ?? null,
+            timeWindow: { ...hostSphere.timeWindow },
+            tags: [
+              ...referencedChild.tags.filter(
+                (tag) =>
+                  tag !== TEMPLATE_DEFINITION_TAG &&
+                  tag !== TEMPLATE_ROOT_TAG &&
+                  tag !== "instanced-subworld",
+              ),
+              "instanced-subworld",
+              `world-instance-${referencedWorldId}`,
+            ],
+          };
+
+          derived.push(derivedChild);
+          nextHosts.push(derivedChild);
+        }
       }
 
-      const referencedRoot = referencedWorld.parent;
-      const hostScale = this.resolveTemplateHostScale(hostSphere, referencedRoot.radius);
-      if (hostScale <= 0) {
-        continue;
-      }
-
-      for (const referencedChild of referencedWorld.children) {
-        const offsetX = referencedChild.position3d[0] - referencedRoot.position3d[0];
-        const offsetY = referencedChild.position3d[1] - referencedRoot.position3d[1];
-        const offsetZ = referencedChild.position3d[2] - referencedRoot.position3d[2];
-        const [rotatedOffsetX, rotatedOffsetY, rotatedOffsetZ] =
-          this.rotateTemplateOffsetByHost(
-            hostSphere,
-            offsetX * hostScale,
-            offsetY * hostScale,
-            offsetZ * hostScale,
-          );
-
-        derived.push({
-          id: `${hostSphere.id}::world-${referencedWorldId}::entity-${referencedChild.id}`,
-          parentId: hostSphere.id,
-          radius: Math.max(0.05, referencedChild.radius * hostScale),
-          position3d: [
-            hostSphere.position3d[0] + rotatedOffsetX,
-            hostSphere.position3d[1] + rotatedOffsetY,
-            hostSphere.position3d[2] + rotatedOffsetZ,
-          ],
-          dimensions: tintWorldInstanceChildDimensions({
-            childDimensions: referencedChild.dimensions,
-            hostDimensions: hostSphere.dimensions,
-            defaultColorChannels: {
-              r: DEFAULT_SPHERE_COLOR_RED,
-              g: DEFAULT_SPHERE_COLOR_GREEN,
-              b: DEFAULT_SPHERE_COLOR_BLUE,
-            },
-            colorDimensionKeys: {
-              red: SPHERE_COLOR_RED_DIMENSION,
-              green: SPHERE_COLOR_GREEN_DIMENSION,
-              blue: SPHERE_COLOR_BLUE_DIMENSION,
-            },
-          }),
-          timeWindow: { ...hostSphere.timeWindow },
-          tags: [
-            ...referencedChild.tags.filter(
-              (tag) =>
-                tag !== TEMPLATE_DEFINITION_TAG &&
-                tag !== TEMPLATE_ROOT_TAG &&
-                tag !== "instanced-subworld",
-            ),
-            "instanced-subworld",
-            `world-instance-${referencedWorldId}`,
-          ],
-        });
-      }
+      hostsForDepth = nextHosts;
     }
 
     return derived;
@@ -1407,17 +1425,14 @@ export class GameApp {
   }
 
   private resolveSelectedSphereTargetWorldId(selectedSphere: SphereEntity): string | null {
-    const directReference = selectedSphere.instanceWorldId?.trim();
-    if (directReference) {
-      return directReference;
-    }
+    return this.resolveReferencedWorldId(selectedSphere);
+  }
 
-    const templateId = this.readTemplateId(selectedSphere);
-    if (templateId > TEMPLATE_NONE_ID) {
-      return `world-template-${templateId}`;
-    }
-
-    return null;
+  private resolveReferencedWorldId(entity: SphereEntity): string | null {
+    return normalizeInstanceWorldIdForRuntime({
+      instanceWorldId: entity.instanceWorldId ?? null,
+      dimensions: entity.dimensions,
+    });
   }
 
   private async handleEnterOrExitWorldShortcut(): Promise<void> {
@@ -1485,11 +1500,12 @@ export class GameApp {
       }
     }
 
-    for (const instancedChild of this.instantiateSharedTemplateChildren(templateHosts)) {
+    const sharedTemplateInstancedChildren = this.instantiateSharedTemplateChildren(templateHosts);
+    for (const instancedChild of sharedTemplateInstancedChildren) {
       pushExpanded(instancedChild);
     }
 
-    for (const instancedChild of this.instantiateReferencedWorldChildren(templateHosts)) {
+    for (const instancedChild of this.instantiateReferencedWorldChildren([...expandedChildren])) {
       pushExpanded(instancedChild);
     }
 
@@ -1513,11 +1529,11 @@ export class GameApp {
       const templateId = entity.dimensions[SUBWORLD_TEMPLATE_DIMENSION];
       const hasInstanceWorldReference =
         typeof entity.instanceWorldId === "string" && entity.instanceWorldId.trim().length > 0;
+      const hasWorldReference =
+        (Number.isFinite(templateId) && Math.trunc(templateId) > TEMPLATE_NONE_ID) ||
+        hasInstanceWorldReference;
       const colorChannels = this.readSphereColorChannels(entity);
-      const portalHost =
-        entity.parentId === snapshot.parent.id &&
-        ((Number.isFinite(templateId) && Math.trunc(templateId) > TEMPLATE_NONE_ID) ||
-          hasInstanceWorldReference);
+      const portalHost = hasWorldReference && !this.isTemplateRootSphere(entity);
       const selectable =
         entity.parentId === snapshot.parent.id &&
         !instancedSubworld &&
@@ -1679,8 +1695,12 @@ export class GameApp {
     const templateHosts = rootView
       ? [snapshot.parent, ...visibleChildren]
       : [...visibleChildren];
+    const candidateHosts: SphereEntity[] = [...templateHosts];
+    for (const host of templateHosts) {
+      candidateHosts.push(...this.worldStore.listDescendantsOf(host.id));
+    }
 
-    return templateHosts.some((host) => host.instanceWorldId?.trim() === worldId);
+    return candidateHosts.some((host) => this.resolveReferencedWorldId(host) === worldId);
   }
 
   private async handleMultiplayerServerReset(
@@ -2121,30 +2141,17 @@ export class GameApp {
       editorMode: this.editorMode,
       tick: this.tick,
       playerPosition: this.player.position,
-      playerVelocity: this.player.velocity,
-      playerGrounded: this.player.grounded,
-      lastCollisionCount: this.lastCollisionCount,
       overlayEnabled: this.overlayEnabled,
       draggingSphereId: this.editorInteractionController.currentDraggingSphereId,
-      createTemplateId: this.createTemplateId,
-      selectedAvatarId: this.selectedAvatarId,
       selectedSphereId: this.worldStore.getSelectedSphereId(),
       currentWorldId: this.currentWorldId,
       availableWorldCount: this.availableWorldIds.length,
-      parentSphereId: this.parentSphere.id,
       obstacleCount: this.obstacles.length,
       worldSourceState: this.worldSourceState,
       backendWorldTick: this.backendWorldTick,
       pendingCommitCount: this.pendingCommitOperations.length,
       saveMessage: this.saveMessage,
-      userId: this.userId,
       multiplayerStatus: this.multiplayerStatus,
-      localPlayerId: this.localPlayerId,
-      remotePlayerCount: this.remoteAvatarRenderSystem.remotePlayerCount,
-      ackedInputSequence: this.localPredictionReconciler.ackedInputSequence,
-      pendingPredictedInputCount: this.localPredictionReconciler.pendingPredictedInputCount,
-      lastSnapshotTick: this.localPredictionReconciler.lastSnapshotTick,
-      reconciliationErrorDistance: this.localPredictionReconciler.lastReconciliationErrorDistance,
       multiplayerError: this.multiplayerError,
     });
   }

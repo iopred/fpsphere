@@ -3,7 +3,7 @@
   "masters": [
     {
       "world_id": "world-main",
-      "tick": 11,
+      "tick": 13,
       "entities": [
         {
           "id": "sphere-world-001",
@@ -199,10 +199,10 @@
             3.353
           ],
           "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
+            "b": 0.0549,
+            "g": 0.0549,
             "money": 0.2561053,
-            "r": 0.18782078,
+            "r": 0.4039,
             "world_pitch": 0.2255,
             "world_scale": 1.0,
             "world_template": 1.0,
@@ -508,6 +508,35 @@
           "instance_world_id": "world-template-1",
           "time_window": {
             "start_tick": 2907,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created",
+            "world-instance"
+          ]
+        },
+        {
+          "id": "sphere-user-05c5ac8c-e10-0001",
+          "parent_id": "sphere-world-001",
+          "radius": 21.426,
+          "position_3d": [
+            -0.879,
+            -1.636,
+            -18.192
+          ],
+          "dimensions": {
+            "b": 0.3277781,
+            "g": 0.23074006,
+            "money": 0.017897403,
+            "r": 0.18782078,
+            "world_pitch": -0.0385,
+            "world_scale": 1.0,
+            "world_template": 1.0,
+            "world_yaw": 1.43
+          },
+          "instance_world_id": "world-template-1",
+          "time_window": {
+            "start_tick": 4357,
             "end_tick": null
           },
           "tags": [
@@ -868,7 +897,7 @@
     },
     {
       "world_id": "world-template-2",
-      "tick": 8,
+      "tick": 10,
       "entities": [
         {
           "id": "sphere-world-001",
@@ -1141,5 +1170,5 @@
     }
   ],
   "user_worlds": [],
-  "commit_seq": 24
+  "commit_seq": 28
 }
