@@ -335,9 +335,21 @@ async fn create_world(
     Json(request): Json<CreateWorldRequest>,
 ) -> Result<(StatusCode, Json<WorldMutationResponse>), (StatusCode, Json<WorldMutationErrorResponse>)>
 {
+    let world_seed = state
+        .seed_worlds
+        .iter()
+        .find(|world| world.world_id == "world-main")
+        .or_else(|| state.seed_worlds.first())
+        .cloned();
+
     let response = {
         let mut repository = state.repository.write().await;
-        repository.create_world(&request.world_id)
+        match world_seed {
+            Some(seed_world) => repository.create_world_from_seed(&request.world_id, seed_world),
+            None => Err(WorldMutationFailure::WorldNotFound {
+                message: "unable to create world: no seed world exists".to_string(),
+            }),
+        }
     };
 
     match response {

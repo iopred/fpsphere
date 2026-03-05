@@ -173,6 +173,21 @@ describe("LocalWorldStore", () => {
     expect(updated?.dimensions.world_template).toBe(1);
   });
 
+  it("updates instance world reference on a selected sphere", () => {
+    const store = new LocalWorldStore(buildSeedWorld());
+    const targetId = "sphere-building-001";
+
+    const changed = store.apply({
+      type: "updateSphereInstanceWorld",
+      sphereId: targetId,
+      instanceWorldId: " world-template-2 ",
+    });
+
+    expect(changed).toBe(true);
+    const updated = store.getChildSphereById(targetId);
+    expect(updated?.instanceWorldId).toBe("world-template-2");
+  });
+
   it("updates sphere position and radius", () => {
     const store = new LocalWorldStore(buildSeedWorld());
     const targetId = "sphere-building-001";

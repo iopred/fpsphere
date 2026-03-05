@@ -48,28 +48,6 @@
           ]
         },
         {
-          "id": "sphere-building-001",
-          "parent_id": "sphere-world-001",
-          "radius": 8.846,
-          "position_3d": [
-            -12.0,
-            -2.0,
-            -6.0
-          ],
-          "dimensions": {
-            "money": 0.6,
-            "world_template": 1.0
-          },
-          "instance_world_id": "world-template-1",
-          "time_window": {
-            "start_tick": 0,
-            "end_tick": null
-          },
-          "tags": [
-            "building"
-          ]
-        },
-        {
           "id": "sphere-world-instance-001",
           "parent_id": "sphere-world-001",
           "radius": 12.0,
@@ -80,8 +58,10 @@
           ],
           "dimensions": {
             "money": 0.35,
+            "world_pitch": 0.055,
             "world_scale": 1.0,
-            "world_template": 1.0
+            "world_template": 1.0,
+            "world_yaw": 0.8635
           },
           "instance_world_id": "world-template-1",
           "time_window": {
@@ -93,27 +73,249 @@
           ]
         },
         {
-          "id": "sphere-user-05c5ac8c-e10-0022",
+          "id": "sphere-user-7d7d9291-c8f-0019",
           "parent_id": "sphere-world-001",
-          "radius": 2.4,
+          "radius": 3.096,
           "position_3d": [
-            2.841,
-            -7.186,
-            17.504
+            -9.483,
+            -4.581,
+            -2.029
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.12815858,
+            "money": 0.04724994,
             "r": 0.18782078,
-            "world_pitch": 0.187,
+            "world_pitch": -0.4579,
             "world_scale": 1.0,
             "world_template": 1.0,
-            "world_yaw": -1.683
+            "world_yaw": 2.6015
           },
           "instance_world_id": "world-template-1",
           "time_window": {
-            "start_tick": 4339,
+            "start_tick": 6708,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created",
+            "world-instance"
+          ]
+        },
+        {
+          "id": "sphere-user-05c5ac8c-e10-0002",
+          "parent_id": "sphere-world-001",
+          "radius": 2.4,
+          "position_3d": [
+            4.272,
+            -4.194,
+            0.528
+          ],
+          "dimensions": {
+            "b": 0.3277781,
+            "g": 0.23074006,
+            "money": 0.48320514,
+            "r": 0.18782078,
+            "world_pitch": -0.0495,
+            "world_scale": 1.0,
+            "world_template": 1.0,
+            "world_yaw": -2.651
+          },
+          "instance_world_id": "world-template-1",
+          "time_window": {
+            "start_tick": 3114,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created",
+            "world-instance"
+          ]
+        },
+        {
+          "id": "sphere-user-05c5ac8c-e10-0003",
+          "parent_id": "sphere-world-001",
+          "radius": 2.4,
+          "position_3d": [
+            0.6468453,
+            -4.271235,
+            -2.6720657
+          ],
+          "dimensions": {
+            "b": 0.3277781,
+            "g": 0.23074006,
+            "money": 0.73981273,
+            "r": 0.18782078,
+            "world_scale": 1.0,
+            "world_template": 1.0
+          },
+          "instance_world_id": "world-template-1",
+          "time_window": {
+            "start_tick": 3189,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created",
+            "world-instance"
+          ]
+        },
+        {
+          "id": "sphere-user-05c5ac8c-e10-0004",
+          "parent_id": "sphere-world-001",
+          "radius": 2.4,
+          "position_3d": [
+            6.432531,
+            -4.786079,
+            3.9790072
+          ],
+          "dimensions": {
+            "b": 0.3277781,
+            "g": 0.23074006,
+            "money": 0.23071118,
+            "r": 0.18782078,
+            "world_pitch": 0.1155,
+            "world_scale": 1.0,
+            "world_template": 1.0,
+            "world_yaw": -1.056
+          },
+          "instance_world_id": "world-template-1",
+          "time_window": {
+            "start_tick": 3262,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created",
+            "world-instance"
+          ]
+        },
+        {
+          "id": "sphere-user-05c5ac8c-e10-0005",
+          "parent_id": "sphere-world-001",
+          "radius": 2.4,
+          "position_3d": [
+            -1.95,
+            -4.351,
+            3.353
+          ],
+          "dimensions": {
+            "b": 0.3277781,
+            "g": 0.23074006,
+            "money": 0.2561053,
+            "r": 0.18782078,
+            "world_pitch": 0.2255,
+            "world_scale": 1.0,
+            "world_template": 1.0,
+            "world_yaw": -1.969
+          },
+          "instance_world_id": "world-template-1",
+          "time_window": {
+            "start_tick": 3365,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created",
+            "world-instance"
+          ]
+        },
+        {
+          "id": "sphere-user-05c5ac8c-e10-0019",
+          "parent_id": "sphere-world-001",
+          "radius": 2.225,
+          "position_3d": [
+            -5.21,
+            -5.726,
+            11.421
+          ],
+          "dimensions": {
+            "b": 0.3277781,
+            "g": 0.23074006,
+            "money": 0.22699042,
+            "r": 0.18782078,
+            "world_scale": 1.0,
+            "world_template": 2.0
+          },
+          "instance_world_id": "world-template-2",
+          "time_window": {
+            "start_tick": 11543,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created",
+            "world-instance"
+          ]
+        },
+        {
+          "id": "sphere-user-05c5ac8c-e10-0020",
+          "parent_id": "sphere-world-001",
+          "radius": 2.4,
+          "position_3d": [
+            -12.2585535,
+            -6.0689545,
+            6.4222493
+          ],
+          "dimensions": {
+            "b": 0.3277781,
+            "g": 0.23074006,
+            "money": 0.70160717,
+            "r": 0.18782078,
+            "world_scale": 1.0,
+            "world_template": 2.0
+          },
+          "instance_world_id": "world-template-2",
+          "time_window": {
+            "start_tick": 12220,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created",
+            "world-instance"
+          ]
+        },
+        {
+          "id": "sphere-user-05c5ac8c-e10-0021",
+          "parent_id": "sphere-world-001",
+          "radius": 2.666,
+          "position_3d": [
+            -3.907,
+            -4.32,
+            -2.405
+          ],
+          "dimensions": {
+            "b": 0.3277781,
+            "g": 0.23074006,
+            "money": 0.07104218,
+            "r": 0.18782078,
+            "world_scale": 1.0,
+            "world_template": 2.0
+          },
+          "instance_world_id": "world-template-2",
+          "time_window": {
+            "start_tick": 12340,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created",
+            "world-instance"
+          ]
+        },
+        {
+          "id": "sphere-user-05c5ac8c-e10-0022",
+          "parent_id": "sphere-world-001",
+          "radius": 2.4,
+          "position_3d": [
+            -3.002,
+            -4.389,
+            7.467
+          ],
+          "dimensions": {
+            "b": 0.3277781,
+            "g": 0.23074006,
+            "money": 0.5759176,
+            "r": 0.18782078,
+            "world_scale": 1.0,
+            "world_template": 2.0
+          },
+          "instance_world_id": "world-template-2",
+          "time_window": {
+            "start_tick": 12738,
             "end_tick": null
           },
           "tags": [
@@ -126,282 +328,21 @@
           "parent_id": "sphere-world-001",
           "radius": 2.4,
           "position_3d": [
-            -4.294,
-            -5.687,
-            11.214
+            4.3768425,
+            -7.457351,
+            17.74154
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.25014618,
-            "r": 0.18782078,
-            "world_pitch": -0.121,
-            "world_scale": 1.0,
-            "world_template": 1.0,
-            "world_yaw": -1.5565
-          },
-          "instance_world_id": "world-template-1",
-          "time_window": {
-            "start_tick": 4542,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created",
-            "world-instance"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0024",
-          "parent_id": "sphere-world-001",
-          "radius": 2.4,
-          "position_3d": [
-            -2.336,
-            -7.128,
-            15.182
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.4458273,
-            "r": 0.18782078,
-            "world_pitch": -0.2145,
-            "world_scale": 1.0,
-            "world_template": 1.0,
-            "world_yaw": 2.035
-          },
-          "instance_world_id": "world-template-1",
-          "time_window": {
-            "start_tick": 4591,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created",
-            "world-instance"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0025",
-          "parent_id": "sphere-world-001",
-          "radius": 2.4,
-          "position_3d": [
-            -2.4111013,
-            -5.0109067,
-            1.7414496
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.4907625,
-            "r": 0.18782078,
-            "world_pitch": 0.0055,
-            "world_scale": 1.0,
-            "world_template": 1.0,
-            "world_yaw": -0.66
-          },
-          "instance_world_id": "world-template-1",
-          "time_window": {
-            "start_tick": 4624,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created",
-            "world-instance"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0026",
-          "parent_id": "sphere-world-001",
-          "radius": 2.4,
-          "position_3d": [
-            -1.851,
-            -5.07,
-            6.119
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.5364594,
-            "r": 0.18782078,
-            "world_pitch": -0.165,
-            "world_scale": 1.0,
-            "world_template": 1.0,
-            "world_yaw": 1.155
-          },
-          "instance_world_id": "world-template-1",
-          "time_window": {
-            "start_tick": 4658,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created",
-            "world-instance"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0027",
-          "parent_id": "sphere-world-001",
-          "radius": 2.4,
-          "position_3d": [
-            3.675849,
-            -5.119663,
-            0.003977883
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.3324653,
-            "r": 0.18782078,
-            "world_pitch": -0.077,
-            "world_scale": 1.0,
-            "world_template": 1.0,
-            "world_yaw": 1.5455
-          },
-          "instance_world_id": "world-template-1",
-          "time_window": {
-            "start_tick": 5758,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created",
-            "world-instance"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0028",
-          "parent_id": "sphere-world-001",
-          "radius": 2.4,
-          "position_3d": [
-            9.146,
-            -5.12,
-            4.356
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.38629338,
-            "r": 0.18782078,
-            "world_pitch": 0.176,
-            "world_scale": 1.0,
-            "world_template": 1.0,
-            "world_yaw": 2.475
-          },
-          "instance_world_id": "world-template-1",
-          "time_window": {
-            "start_tick": 5914,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created",
-            "world-instance"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0029",
-          "parent_id": "sphere-world-001",
-          "radius": 2.4,
-          "position_3d": [
-            3.88,
-            -5.004,
-            6.3
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.16407664,
-            "r": 0.18782078,
-            "world_pitch": 0.1375,
-            "world_scale": 1.0,
-            "world_template": 1.0,
-            "world_yaw": -1.749
-          },
-          "instance_world_id": "world-template-1",
-          "time_window": {
-            "start_tick": 6173,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created",
-            "world-instance"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0030",
-          "parent_id": "sphere-world-001",
-          "radius": 3.033,
-          "position_3d": [
-            5.46,
-            -6.69,
-            12.684
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.6690916,
-            "r": 0.18782078,
-            "world_pitch": 0.176,
-            "world_scale": 1.0,
-            "world_template": 1.0,
-            "world_yaw": 0.935
-          },
-          "instance_world_id": "world-template-1",
-          "time_window": {
-            "start_tick": 6536,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created",
-            "world-instance"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0031",
-          "parent_id": "sphere-world-001",
-          "radius": 2.151,
-          "position_3d": [
-            -9.056,
-            -4.237,
-            -1.003
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.88374424,
-            "r": 0.18782078,
-            "world_pitch": 0.9625,
-            "world_scale": 1.0,
-            "world_template": 1.0,
-            "world_yaw": 0.5335
-          },
-          "instance_world_id": "world-template-1",
-          "time_window": {
-            "start_tick": 7043,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created",
-            "world-instance"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0032",
-          "parent_id": "sphere-world-001",
-          "radius": 3.887,
-          "position_3d": [
-            1.549,
-            -4.328,
-            2.733
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.8829516,
+            "money": 0.38813978,
             "r": 0.18782078,
             "world_scale": 1.0,
-            "world_template": 1.0
+            "world_template": 2.0
           },
-          "instance_world_id": "world-template-1",
+          "instance_world_id": "world-template-2",
           "time_window": {
-            "start_tick": 7730,
+            "start_tick": 13011,
             "end_tick": null
           },
           "tags": [
@@ -412,24 +353,22 @@
         {
           "id": "sphere-user-7d7d9291-c8f-0001",
           "parent_id": "sphere-world-001",
-          "radius": 1.909,
+          "radius": 1.129,
           "position_3d": [
-            -14.048,
-            -4.302,
-            -0.62
+            0.777,
+            -6.728,
+            13.184
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.6829137,
+            "money": 0.686128,
             "r": 0.18782078,
-            "world_pitch": 0.8635,
-            "world_template": 1.0,
-            "world_yaw": -0.176
+            "world_template": 0.0
           },
-          "instance_world_id": "world-template-1",
+          "instance_world_id": null,
           "time_window": {
-            "start_tick": 31704,
+            "start_tick": 352,
             "end_tick": null
           },
           "tags": [
@@ -441,24 +380,26 @@
           "parent_id": "sphere-world-001",
           "radius": 2.4,
           "position_3d": [
-            8.534448,
-            -6.667694,
-            -10.366903
+            -3.740832,
+            -7.399918,
+            17.639826
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.32429925,
+            "money": 0.36929017,
             "r": 0.18782078,
+            "world_scale": 1.0,
             "world_template": 1.0
           },
           "instance_world_id": "world-template-1",
           "time_window": {
-            "start_tick": 8955,
+            "start_tick": 609,
             "end_tick": null
           },
           "tags": [
-            "user-created"
+            "user-created",
+            "world-instance"
           ]
         },
         {
@@ -466,24 +407,28 @@
           "parent_id": "sphere-world-001",
           "radius": 2.4,
           "position_3d": [
-            11.62449,
-            -5.990968,
-            -4.3899913
+            5.793,
+            -6.898,
+            13.323
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.3758527,
+            "money": 0.3505829,
             "r": 0.18782078,
-            "world_template": 1.0
+            "world_pitch": -0.154,
+            "world_scale": 1.0,
+            "world_template": 2.0,
+            "world_yaw": -3.751
           },
-          "instance_world_id": "world-template-1",
+          "instance_world_id": "world-template-2",
           "time_window": {
-            "start_tick": 9331,
+            "start_tick": 1719,
             "end_tick": null
           },
           "tags": [
-            "user-created"
+            "user-created",
+            "world-instance"
           ]
         },
         {
@@ -491,24 +436,26 @@
           "parent_id": "sphere-world-001",
           "radius": 2.4,
           "position_3d": [
-            3.798565,
-            -6.21432,
-            -10.959165
+            -16.118,
+            -6.726,
+            -0.262
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.5758229,
+            "money": 0.4366159,
             "r": 0.18782078,
-            "world_template": 1.0
+            "world_scale": 1.0,
+            "world_template": 2.0
           },
-          "instance_world_id": "world-template-1",
+          "instance_world_id": "world-template-2",
           "time_window": {
-            "start_tick": 9630,
+            "start_tick": 2277,
             "end_tick": null
           },
           "tags": [
-            "user-created"
+            "user-created",
+            "world-instance"
           ]
         },
         {
@@ -516,24 +463,26 @@
           "parent_id": "sphere-world-001",
           "radius": 2.4,
           "position_3d": [
-            -1.875,
-            -4.75,
-            -6.954
+            -11.280568,
+            -7.6157613,
+            16.139753
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.16129847,
+            "money": 0.3086309,
             "r": 0.18782078,
+            "world_scale": 1.0,
             "world_template": 1.0
           },
           "instance_world_id": "world-template-1",
           "time_window": {
-            "start_tick": 10096,
+            "start_tick": 2710,
             "end_tick": null
           },
           "tags": [
-            "user-created"
+            "user-created",
+            "world-instance"
           ]
         },
         {
@@ -541,125 +490,21 @@
           "parent_id": "sphere-world-001",
           "radius": 2.4,
           "position_3d": [
-            2.156,
-            -4.727,
-            -3.873
+            15.343106,
+            -6.463544,
+            -3.0443866
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.10241589,
-            "r": 0.18782078,
-            "world_template": 1.0
-          },
-          "instance_world_id": "world-template-1",
-          "time_window": {
-            "start_tick": 10700,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created"
-          ]
-        },
-        {
-          "id": "sphere-user-7d7d9291-c8f-0007",
-          "parent_id": "sphere-world-001",
-          "radius": 2.4,
-          "position_3d": [
-            5.7999516,
-            -7.61531,
-            15.567266
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.8217385,
+            "money": 0.99367267,
             "r": 0.18782078,
             "world_scale": 1.0,
             "world_template": 1.0
           },
           "instance_world_id": "world-template-1",
           "time_window": {
-            "start_tick": 362,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created",
-            "world-instance"
-          ]
-        },
-        {
-          "id": "sphere-user-7d7d9291-c8f-0008",
-          "parent_id": "sphere-world-001",
-          "radius": 2.4,
-          "position_3d": [
-            1.055,
-            -5.476,
-            11.095
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.7914438,
-            "r": 0.18782078,
-            "world_scale": 1.0,
-            "world_template": 1.0
-          },
-          "instance_world_id": "world-template-1",
-          "time_window": {
-            "start_tick": 459,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created",
-            "world-instance"
-          ]
-        },
-        {
-          "id": "sphere-user-7d7d9291-c8f-0009",
-          "parent_id": "sphere-world-001",
-          "radius": 2.4,
-          "position_3d": [
-            -12.586516,
-            -6.5478683,
-            5.87953
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.73434883,
-            "r": 0.18782078,
-            "world_template": 0.0
-          },
-          "instance_world_id": null,
-          "time_window": {
-            "start_tick": 3974,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created"
-          ]
-        },
-        {
-          "id": "sphere-user-7d7d9291-c8f-0010",
-          "parent_id": "sphere-world-001",
-          "radius": 3.901,
-          "position_3d": [
-            -10.745,
-            -4.888,
-            11.23
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.5650012,
-            "r": 0.18782078,
-            "world_scale": 1.0,
-            "world_template": 1.0
-          },
-          "instance_world_id": "world-template-1",
-          "time_window": {
-            "start_tick": 4439,
+            "start_tick": 2907,
             "end_tick": null
           },
           "tags": [
@@ -671,7 +516,7 @@
     },
     {
       "world_id": "world-template-1",
-      "tick": 8,
+      "tick": 2,
       "entities": [
         {
           "id": "sphere-template-world-001",
@@ -683,16 +528,11 @@
             0.0
           ],
           "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.0,
-            "r": 0.18782078,
-            "world_scale": 1.0,
-            "world_template": 1.0
+            "money": 0.0
           },
-          "instance_world_id": "world-template-1",
+          "instance_world_id": null,
           "time_window": {
-            "start_tick": 1825,
+            "start_tick": 0,
             "end_tick": null
           },
           "tags": [
@@ -701,7 +541,7 @@
           ]
         },
         {
-          "id": "sphere-template-root-1::template-1::ground-shell",
+          "id": "sphere-template-ground-001",
           "parent_id": "sphere-template-world-001",
           "radius": 10.4,
           "position_3d": [
@@ -714,16 +554,15 @@
           },
           "instance_world_id": null,
           "time_window": {
-            "start_tick": 1825,
+            "start_tick": 0,
             "end_tick": null
           },
           "tags": [
-            "ground",
-            "template-definition"
+            "ground"
           ]
         },
         {
-          "id": "sphere-template-root-1::template-1::hub-core",
+          "id": "sphere-template-building-001",
           "parent_id": "sphere-template-world-001",
           "radius": 2.2,
           "position_3d": [
@@ -732,20 +571,20 @@
             -2.4
           ],
           "dimensions": {
-            "money": 0.7
+            "money": 0.7,
+            "world_template": 2.0
           },
-          "instance_world_id": null,
+          "instance_world_id": "world-template-2",
           "time_window": {
-            "start_tick": 1825,
+            "start_tick": 0,
             "end_tick": null
           },
           "tags": [
-            "building",
-            "template-definition"
+            "building"
           ]
         },
         {
-          "id": "sphere-template-root-1::template-1::resource-node",
+          "id": "sphere-template-resource-001",
           "parent_id": "sphere-template-world-001",
           "radius": 1.1,
           "position_3d": [
@@ -758,33 +597,32 @@
           },
           "instance_world_id": null,
           "time_window": {
-            "start_tick": 1825,
+            "start_tick": 0,
             "end_tick": null
           },
           "tags": [
-            "resource",
-            "template-definition"
+            "resource"
           ]
         },
         {
-          "id": "sphere-user-05c5ac8c-e10-0001",
+          "id": "sphere-user-7d7d9291-c8f-0001",
           "parent_id": "sphere-template-world-001",
           "radius": 1.44,
           "position_3d": [
-            -2.0791733,
-            0.84689766,
-            -3.64613
+            4.212554,
+            -2.121646,
+            4.140177
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.012327418,
+            "money": 0.9556372,
             "r": 0.18782078,
             "world_template": 0.0
           },
           "instance_world_id": null,
           "time_window": {
-            "start_tick": 1979,
+            "start_tick": 1657,
             "end_tick": null
           },
           "tags": [
@@ -792,24 +630,24 @@
           ]
         },
         {
-          "id": "sphere-user-05c5ac8c-e10-0002",
+          "id": "sphere-user-7d7d9291-c8f-0002",
           "parent_id": "sphere-template-world-001",
           "radius": 1.44,
           "position_3d": [
-            -1.0940409,
-            1.9777868,
-            -3.2185867
+            4.2935576,
+            -0.6343773,
+            4.683004
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.39609477,
+            "money": 0.31813702,
             "r": 0.18782078,
             "world_template": 0.0
           },
           "instance_world_id": null,
           "time_window": {
-            "start_tick": 2013,
+            "start_tick": 1679,
             "end_tick": null
           },
           "tags": [
@@ -817,24 +655,24 @@
           ]
         },
         {
-          "id": "sphere-user-05c5ac8c-e10-0003",
+          "id": "sphere-user-7d7d9291-c8f-0003",
           "parent_id": "sphere-template-world-001",
           "radius": 1.44,
           "position_3d": [
-            -0.65646875,
-            2.7537,
-            -2.6426556
+            4.2124934,
+            0.16458882,
+            4.795796
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.12692328,
+            "money": 0.13689305,
             "r": 0.18782078,
             "world_template": 0.0
           },
           "instance_world_id": null,
           "time_window": {
-            "start_tick": 2045,
+            "start_tick": 1690,
             "end_tick": null
           },
           "tags": [
@@ -842,24 +680,24 @@
           ]
         },
         {
-          "id": "sphere-user-05c5ac8c-e10-0004",
+          "id": "sphere-user-7d7d9291-c8f-0004",
           "parent_id": "sphere-template-world-001",
           "radius": 1.44,
           "position_3d": [
-            -0.2152748,
-            3.566918,
-            -1.6569023
+            4.115972,
+            1.2087868,
+            4.56119
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.9989297,
+            "money": 0.75922346,
             "r": 0.18782078,
             "world_template": 0.0
           },
           "instance_world_id": null,
           "time_window": {
-            "start_tick": 2071,
+            "start_tick": 1701,
             "end_tick": null
           },
           "tags": [
@@ -867,24 +705,24 @@
           ]
         },
         {
-          "id": "sphere-user-05c5ac8c-e10-0005",
+          "id": "sphere-user-7d7d9291-c8f-0005",
           "parent_id": "sphere-template-world-001",
           "radius": 1.44,
           "position_3d": [
-            0.30112275,
-            3.9578025,
-            -0.6241696
+            4.142915,
+            1.7934991,
+            4.0467477
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.3854384,
+            "money": 0.4565318,
             "r": 0.18782078,
             "world_template": 0.0
           },
           "instance_world_id": null,
           "time_window": {
-            "start_tick": 2102,
+            "start_tick": 1713,
             "end_tick": null
           },
           "tags": [
@@ -892,24 +730,24 @@
           ]
         },
         {
-          "id": "sphere-user-05c5ac8c-e10-0006",
+          "id": "sphere-user-7d7d9291-c8f-0006",
           "parent_id": "sphere-template-world-001",
           "radius": 1.44,
           "position_3d": [
-            1.0259303,
-            3.919984,
-            0.5777274
+            3.750864,
+            3.0707483,
+            2.3842514
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.3927889,
+            "money": 0.17458023,
             "r": 0.18782078,
             "world_template": 0.0
           },
           "instance_world_id": null,
           "time_window": {
-            "start_tick": 2162,
+            "start_tick": 1723,
             "end_tick": null
           },
           "tags": [
@@ -917,24 +755,24 @@
           ]
         },
         {
-          "id": "sphere-user-05c5ac8c-e10-0007",
+          "id": "sphere-user-7d7d9291-c8f-0007",
           "parent_id": "sphere-template-world-001",
           "radius": 1.44,
           "position_3d": [
-            2.0170114,
-            3.1523767,
-            1.1363614
+            3.7341957,
+            3.1051857,
+            2.056157
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.44302654,
+            "money": 0.52942264,
             "r": 0.18782078,
             "world_template": 0.0
           },
           "instance_world_id": null,
           "time_window": {
-            "start_tick": 2196,
+            "start_tick": 1734,
             "end_tick": null
           },
           "tags": [
@@ -942,24 +780,24 @@
           ]
         },
         {
-          "id": "sphere-user-05c5ac8c-e10-0008",
+          "id": "sphere-user-7d7d9291-c8f-0008",
           "parent_id": "sphere-template-world-001",
           "radius": 1.44,
           "position_3d": [
-            2.6356258,
-            2.342235,
-            1.2266872
+            4.094422,
+            1.8776091,
+            0.05432822
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.019019393,
+            "money": 0.12535375,
             "r": 0.18782078,
             "world_template": 0.0
           },
           "instance_world_id": null,
           "time_window": {
-            "start_tick": 2231,
+            "start_tick": 1745,
             "end_tick": null
           },
           "tags": [
@@ -967,24 +805,24 @@
           ]
         },
         {
-          "id": "sphere-user-05c5ac8c-e10-0009",
+          "id": "sphere-user-7d7d9291-c8f-0009",
           "parent_id": "sphere-template-world-001",
           "radius": 1.44,
           "position_3d": [
-            3.0855253,
-            1.2380341,
-            0.5202763
+            4.0322213,
+            0.91847,
+            -0.72678375
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.099264905,
+            "money": 0.40904677,
             "r": 0.18782078,
             "world_template": 0.0
           },
           "instance_world_id": null,
           "time_window": {
-            "start_tick": 2264,
+            "start_tick": 1756,
             "end_tick": null
           },
           "tags": [
@@ -992,24 +830,24 @@
           ]
         },
         {
-          "id": "sphere-user-05c5ac8c-e10-0010",
+          "id": "sphere-user-7d7d9291-c8f-0010",
           "parent_id": "sphere-template-world-001",
           "radius": 1.44,
           "position_3d": [
-            3.2278812,
-            0.19528785,
-            0.12534751
+            4.0371985,
+            0.4867006,
+            -0.86945796
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.050744675,
+            "money": 0.9160563,
             "r": 0.18782078,
             "world_template": 0.0
           },
           "instance_world_id": null,
           "time_window": {
-            "start_tick": 2301,
+            "start_tick": 1767,
             "end_tick": null
           },
           "tags": [
@@ -1017,274 +855,24 @@
           ]
         },
         {
-          "id": "sphere-user-05c5ac8c-e10-0011",
+          "id": "sphere-user-7d7d9291-c8f-0011",
           "parent_id": "sphere-template-world-001",
           "radius": 1.44,
           "position_3d": [
-            3.1433735,
-            -0.76538724,
-            -0.1983815
+            3.62639,
+            -1.1405656,
+            -1.3456329
           ],
           "dimensions": {
             "b": 0.3277781,
             "g": 0.23074006,
-            "money": 0.73398334,
+            "money": 0.75684834,
             "r": 0.18782078,
             "world_template": 0.0
           },
           "instance_world_id": null,
           "time_window": {
-            "start_tick": 2332,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0012",
-          "parent_id": "sphere-template-world-001",
-          "radius": 0.803,
-          "position_3d": [
-            4.9799733,
-            -1.9098049,
-            2.3876147
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.88536143,
-            "r": 0.18782078,
-            "world_template": 0.0
-          },
-          "instance_world_id": null,
-          "time_window": {
-            "start_tick": 2554,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0013",
-          "parent_id": "sphere-template-world-001",
-          "radius": 0.977,
-          "position_3d": [
-            5.250202,
-            -0.50452375,
-            2.941167
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.8102148,
-            "r": 0.18782078,
-            "world_template": 0.0
-          },
-          "instance_world_id": null,
-          "time_window": {
-            "start_tick": 2687,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0014",
-          "parent_id": "sphere-template-world-001",
-          "radius": 0.712,
-          "position_3d": [
-            5.1756124,
-            0.5114693,
-            3.5623071
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.8849805,
-            "r": 0.18782078,
-            "world_template": 0.0
-          },
-          "instance_world_id": null,
-          "time_window": {
-            "start_tick": 2765,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0015",
-          "parent_id": "sphere-template-world-001",
-          "radius": 0.619,
-          "position_3d": [
-            4.9850683,
-            1.1249175,
-            4.0410213
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.32338497,
-            "r": 0.18782078,
-            "world_template": 0.0
-          },
-          "instance_world_id": null,
-          "time_window": {
-            "start_tick": 2879,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0016",
-          "parent_id": "sphere-template-world-001",
-          "radius": 0.497,
-          "position_3d": [
-            4.7204356,
-            1.6153467,
-            4.5053144
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.44040877,
-            "r": 0.18782078,
-            "world_template": 0.0
-          },
-          "instance_world_id": null,
-          "time_window": {
-            "start_tick": 2996,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0017",
-          "parent_id": "sphere-template-world-001",
-          "radius": 0.477,
-          "position_3d": [
-            4.3681545,
-            2.0773766,
-            4.875391
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.90170795,
-            "r": 0.18782078,
-            "world_template": 0.0
-          },
-          "instance_world_id": null,
-          "time_window": {
-            "start_tick": 3125,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0018",
-          "parent_id": "sphere-template-world-001",
-          "radius": 0.693,
-          "position_3d": [
-            3.8887448,
-            2.540335,
-            5.2310653
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.15518874,
-            "r": 0.18782078,
-            "world_template": 0.0
-          },
-          "instance_world_id": null,
-          "time_window": {
-            "start_tick": 3259,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0019",
-          "parent_id": "sphere-template-world-001",
-          "radius": 0.342,
-          "position_3d": [
-            3.5420017,
-            3.0179596,
-            4.6439853
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.36798114,
-            "r": 0.18782078,
-            "world_template": 0.0
-          },
-          "instance_world_id": null,
-          "time_window": {
-            "start_tick": 3454,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0020",
-          "parent_id": "sphere-template-world-001",
-          "radius": 0.377,
-          "position_3d": [
-            3.3254335,
-            2.8156798,
-            5.813163
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.4068953,
-            "r": 0.18782078,
-            "world_template": 0.0
-          },
-          "instance_world_id": null,
-          "time_window": {
-            "start_tick": 3614,
-            "end_tick": null
-          },
-          "tags": [
-            "user-created"
-          ]
-        },
-        {
-          "id": "sphere-user-05c5ac8c-e10-0021",
-          "parent_id": "sphere-template-world-001",
-          "radius": 0.372,
-          "position_3d": [
-            4.090366,
-            2.0678794,
-            5.73192
-          ],
-          "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
-            "money": 0.09111391,
-            "r": 0.18782078,
-            "world_template": 0.0
-          },
-          "instance_world_id": null,
-          "time_window": {
-            "start_tick": 3750,
+            "start_tick": 1778,
             "end_tick": null
           },
           "tags": [
@@ -1295,15 +883,228 @@
     },
     {
       "world_id": "world-template-2",
-      "tick": 0,
-      "entities": []
-    },
-    {
-      "world_id": "world-template-3",
-      "tick": 0,
-      "entities": []
+      "tick": 3,
+      "entities": [
+        {
+          "id": "sphere-world-001",
+          "parent_id": null,
+          "radius": 60.0,
+          "position_3d": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "dimensions": {
+            "money": 0.0
+          },
+          "instance_world_id": null,
+          "time_window": {
+            "start_tick": 0,
+            "end_tick": null
+          },
+          "tags": [
+            "world"
+          ]
+        },
+        {
+          "id": "sphere-ground-001",
+          "parent_id": "sphere-world-001",
+          "radius": 50.0,
+          "position_3d": [
+            0.0,
+            -55.0,
+            0.0
+          ],
+          "dimensions": {
+            "money": 0.1
+          },
+          "instance_world_id": null,
+          "time_window": {
+            "start_tick": 0,
+            "end_tick": null
+          },
+          "tags": [
+            "ground"
+          ]
+        },
+        {
+          "id": "sphere-user-05c5ac8c-e10-0006",
+          "parent_id": "sphere-world-001",
+          "radius": 2.4,
+          "position_3d": [
+            1.0156885,
+            -4.955771,
+            2.6806266
+          ],
+          "dimensions": {
+            "b": 0.3277781,
+            "g": 0.23074006,
+            "money": 0.56601316,
+            "r": 0.18782078,
+            "world_template": 0.0
+          },
+          "instance_world_id": null,
+          "time_window": {
+            "start_tick": 6402,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created"
+          ]
+        },
+        {
+          "id": "sphere-user-05c5ac8c-e10-0007",
+          "parent_id": "sphere-world-001",
+          "radius": 2.4,
+          "position_3d": [
+            0.7852149,
+            -2.7305427,
+            3.0518231
+          ],
+          "dimensions": {
+            "b": 0.3277781,
+            "g": 0.23074006,
+            "money": 0.08801749,
+            "r": 0.18782078,
+            "world_template": 0.0
+          },
+          "instance_world_id": null,
+          "time_window": {
+            "start_tick": 6429,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created"
+          ]
+        },
+        {
+          "id": "sphere-user-05c5ac8c-e10-0008",
+          "parent_id": "sphere-world-001",
+          "radius": 2.4,
+          "position_3d": [
+            0.41157764,
+            -0.20517054,
+            4.405791
+          ],
+          "dimensions": {
+            "b": 0.3277781,
+            "g": 0.23074006,
+            "money": 0.6979577,
+            "r": 0.18782078,
+            "world_template": 0.0
+          },
+          "instance_world_id": null,
+          "time_window": {
+            "start_tick": 6457,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created"
+          ]
+        },
+        {
+          "id": "sphere-user-05c5ac8c-e10-0009",
+          "parent_id": "sphere-world-001",
+          "radius": 2.4,
+          "position_3d": [
+            0.46916,
+            1.7107995,
+            6.576487
+          ],
+          "dimensions": {
+            "b": 0.3277781,
+            "g": 0.23074006,
+            "money": 0.7805091,
+            "r": 0.18782078,
+            "world_template": 0.0
+          },
+          "instance_world_id": null,
+          "time_window": {
+            "start_tick": 6487,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created"
+          ]
+        },
+        {
+          "id": "sphere-user-05c5ac8c-e10-0010",
+          "parent_id": "sphere-world-001",
+          "radius": 2.198,
+          "position_3d": [
+            0.7538738,
+            2.796426,
+            9.691957
+          ],
+          "dimensions": {
+            "b": 0.3277781,
+            "g": 0.23074006,
+            "money": 0.9346755,
+            "r": 0.18782078,
+            "world_template": 0.0
+          },
+          "instance_world_id": null,
+          "time_window": {
+            "start_tick": 6517,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created"
+          ]
+        },
+        {
+          "id": "sphere-user-05c5ac8c-e10-0011",
+          "parent_id": "sphere-world-001",
+          "radius": 0.693,
+          "position_3d": [
+            0.56,
+            1.129,
+            11.292
+          ],
+          "dimensions": {
+            "b": 0.3277781,
+            "g": 0.23074006,
+            "money": 0.06095674,
+            "r": 0.18782078,
+            "world_template": 0.0
+          },
+          "instance_world_id": null,
+          "time_window": {
+            "start_tick": 6676,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created"
+          ]
+        },
+        {
+          "id": "sphere-user-05c5ac8c-e10-0012",
+          "parent_id": "sphere-world-001",
+          "radius": 0.653,
+          "position_3d": [
+            2.079,
+            1.684,
+            10.997
+          ],
+          "dimensions": {
+            "b": 0.3277781,
+            "g": 0.23074006,
+            "money": 0.57925725,
+            "r": 0.18782078,
+            "world_template": 0.0
+          },
+          "instance_world_id": null,
+          "time_window": {
+            "start_tick": 7278,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created"
+          ]
+        }
+      ]
     }
   ],
   "user_worlds": [],
-  "commit_seq": 8
+  "commit_seq": 13
 }

@@ -120,6 +120,11 @@
       }
     },
     {
+      "type": "update_instance_world",
+      "sphere_id": "sphere-building-001",
+      "instance_world_id": "world-template-1"
+    },
+    {
       "type": "update_radius",
       "sphere_id": "sphere-building-001",
       "radius": 6.5

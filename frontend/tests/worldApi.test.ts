@@ -269,7 +269,7 @@ describe("worldApi", () => {
         root_world_id: "world-main",
         instance_path: ["sphere-template-root-1"],
       });
-      expect(body.operations).toHaveLength(4);
+      expect(body.operations).toHaveLength(5);
       expect(body.operations[0].type).toBe("create");
       expect(body.operations[1].type).toBe("delete");
       expect(body.operations[2]).toEqual({
@@ -278,6 +278,11 @@ describe("worldApi", () => {
         dimensions: { world_template: 1 },
       });
       expect(body.operations[3]).toEqual({
+        type: "update_instance_world",
+        sphere_id: "sphere-keep-001",
+        instance_world_id: "world-template-1",
+      });
+      expect(body.operations[4]).toEqual({
         type: "update_radius",
         sphere_id: "sphere-keep-001",
         radius: 4.75,
@@ -342,6 +347,11 @@ describe("worldApi", () => {
         type: "updateDimensions",
         sphereId: "sphere-keep-001",
         dimensions: { world_template: 1 },
+      },
+      {
+        type: "updateInstanceWorld",
+        sphereId: "sphere-keep-001",
+        instanceWorldId: "world-template-1",
       },
       {
         type: "updateRadius",

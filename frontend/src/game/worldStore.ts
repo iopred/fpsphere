@@ -28,6 +28,11 @@ export type WorldEditCommand =
       dimensions: Record<string, number>;
     }
   | {
+      type: "updateSphereInstanceWorld";
+      sphereId: string;
+      instanceWorldId: string | null;
+    }
+  | {
       type: "updateSpherePosition";
       sphereId: string;
       position3d: [number, number, number];
@@ -306,6 +311,23 @@ export class LocalWorldStore {
         }
 
         sphere.dimensions = nextDimensions;
+        changed = true;
+        break;
+      }
+
+      case "updateSphereInstanceWorld": {
+        const sphere = this.entitiesById.get(command.sphereId);
+        if (!sphere) {
+          return false;
+        }
+
+        const normalized = command.instanceWorldId?.trim();
+        const nextInstanceWorldId = normalized && normalized.length > 0 ? normalized : null;
+        if ((sphere.instanceWorldId ?? null) === nextInstanceWorldId) {
+          return false;
+        }
+
+        sphere.instanceWorldId = nextInstanceWorldId;
         changed = true;
         break;
       }

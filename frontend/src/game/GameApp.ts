@@ -8,7 +8,6 @@ import {
   type PlayerBody,
 } from "./physics";
 import {
-  getAvailableSubworldTemplateIds,
   getTemplateRootRadius,
   getTemplateRootSphereId,
   instantiateSubworldChildren,
@@ -56,7 +55,10 @@ import { GameplayHudPanel } from "./gameplayHudPanel";
 import { EditorInteractionController } from "./editorInteractionController";
 import { EditorKeyboardController } from "./editorKeyboardController";
 import { EditorActionsController } from "./editorActionsController";
-import { resolveTemplateIdFromEntity } from "./worldInstanceRefs";
+import {
+  decodeTemplateIdFromInstanceWorldId,
+  resolveTemplateIdFromEntity,
+} from "./worldInstanceRefs";
 
 const FIXED_STEP_SECONDS = 1 / 60;
 const MOVE_SPEED = 18;
@@ -150,10 +152,6 @@ export class GameApp {
   private readonly multiplayerClient = new MultiplayerClient();
   private readonly remoteAvatarRenderSystem = new RemoteAvatarRenderSystem(this.scene);
   private readonly avatarIdChoices = availableAvatarIds();
-  private readonly templateIdChoices = [
-    TEMPLATE_NONE_ID,
-    ...getAvailableSubworldTemplateIds(),
-  ];
   private readonly worldNavigationStack: string[] = [];
   private readonly instancedWorldById = new Map<string, SeedWorld>();
   private readonly instancedWorldLoadInFlight = new Set<string>();
@@ -164,6 +162,7 @@ export class GameApp {
   private lastCollisionCount = 0;
   private overlayEnabled = false;
   private editorMode = false;
+  private createInstanceWorldId: string | null = null;
   private createTemplateId = TEMPLATE_NONE_ID;
   private readonly editorInteractionController: EditorInteractionController;
   private pendingCommitOperations: WorldCommitOperation[] = [];
@@ -225,8 +224,10 @@ export class GameApp {
         b: DEFAULT_SPHERE_COLOR_BLUE,
       }),
       {
-        onAdjustCreateTemplate: (delta) => this.adjustCreateTemplateId(delta),
-        onAdjustSelectedTemplate: (delta) => this.adjustSelectedTemplateId(delta),
+        onSelectCreateWorld: (instanceWorldId) =>
+          this.setCreateInstanceWorldId(instanceWorldId),
+        onSelectSelectedWorld: (instanceWorldId) =>
+          this.setSelectedSphereInstanceWorldId(instanceWorldId),
         onAdjustAvatar: (delta) => this.adjustSelectedAvatarId(delta),
         onColorInput: (value) => this.onSelectedColorInput(value),
       },
@@ -301,6 +302,7 @@ export class GameApp {
         getPlayerPosition: () => this.player.position,
         getCamera: () => this.camera,
         getCreateTemplateId: () => this.createTemplateId,
+        getCreateInstanceWorldId: () => this.createInstanceWorldId,
         getTick: () => this.tick,
         getDefaultColorDimensions: () => this.getDefaultColorDimensions(),
         randomMoney: () => Math.random(),
@@ -742,6 +744,36 @@ export class GameApp {
       type: "updateDimensions",
       sphereId,
       dimensions: { ...dimensions },
+    });
+  }
+
+  private queueUpdateInstanceWorldOperation(
+    sphereId: string,
+    instanceWorldId: string | null,
+  ): void {
+    const normalized = instanceWorldId?.trim();
+    const nextInstanceWorldId = normalized && normalized.length > 0 ? normalized : null;
+
+    if (
+      this.updatePendingCreateSphere(sphereId, (sphere) => {
+        sphere.instanceWorldId = nextInstanceWorldId;
+      })
+    ) {
+      return;
+    }
+
+    for (let index = this.pendingCommitOperations.length - 1; index >= 0; index -= 1) {
+      const operation = this.pendingCommitOperations[index];
+      if (operation.type === "updateInstanceWorld" && operation.sphereId === sphereId) {
+        operation.instanceWorldId = nextInstanceWorldId;
+        return;
+      }
+    }
+
+    this.pendingCommitOperations.push({
+      type: "updateInstanceWorld",
+      sphereId,
+      instanceWorldId: nextInstanceWorldId,
     });
   }
 
@@ -1196,42 +1228,53 @@ export class GameApp {
     return derived;
   }
 
-  private getCreateTemplateMaxId(): number {
-    let maxTemplateId = this.templateIdChoices[this.templateIdChoices.length - 1] ?? TEMPLATE_NONE_ID;
-
-    const root = this.worldStore.getRootSphere();
-    maxTemplateId = Math.max(maxTemplateId, this.readTemplateId(root));
-    for (const sphere of this.worldStore.listDescendantsOf(root.id)) {
-      maxTemplateId = Math.max(maxTemplateId, this.readTemplateId(sphere));
+  private normalizeInstanceWorldIdChoice(instanceWorldId: string | null | undefined): string | null {
+    const normalized = instanceWorldId?.trim();
+    if (!normalized || normalized.length === 0) {
+      return null;
     }
 
-    return maxTemplateId;
-  }
-
-  private stepTemplateId(
-    currentTemplateId: number,
-    delta: number,
-    allowBeyondKnownChoices: boolean = false,
-  ): number {
-    const base = Number.isFinite(currentTemplateId)
-      ? Math.max(TEMPLATE_NONE_ID, Math.trunc(currentTemplateId))
-      : TEMPLATE_NONE_ID;
-    const step = delta < 0 ? -1 : 1;
-    const nextId = Math.max(TEMPLATE_NONE_ID, base + step);
-
-    if (allowBeyondKnownChoices) {
-      return nextId;
+    // Prevent self-recursive world references from the editor picker.
+    if (normalized === this.currentWorldId) {
+      return null;
     }
 
-    return Math.min(this.getCreateTemplateMaxId(), nextId);
+    return normalized;
   }
 
-  private adjustCreateTemplateId(delta: number): void {
-    this.createTemplateId = this.stepTemplateId(this.createTemplateId, delta);
+  private listInstanceWorldChoices(
+    extras: Array<string | null | undefined> = [],
+  ): string[] {
+    const values: string[] = [];
+    const seen = new Set<string>();
+    const pushValue = (value: string | null | undefined): void => {
+      const normalized = this.normalizeInstanceWorldIdChoice(value);
+      if (!normalized || seen.has(normalized)) {
+        return;
+      }
+      seen.add(normalized);
+      values.push(normalized);
+    };
+
+    for (const worldId of this.availableWorldIds) {
+      pushValue(worldId);
+    }
+    for (const extraValue of extras) {
+      pushValue(extraValue);
+    }
+
+    return values;
+  }
+
+  private setCreateInstanceWorldId(instanceWorldId: string | null): void {
+    const normalized = this.normalizeInstanceWorldIdChoice(instanceWorldId);
+    this.createInstanceWorldId = normalized;
+    this.createTemplateId =
+      decodeTemplateIdFromInstanceWorldId(normalized) ?? TEMPLATE_NONE_ID;
     this.updateTemplateHud();
   }
 
-  private adjustSelectedTemplateId(delta: number): void {
+  private setSelectedSphereInstanceWorldId(instanceWorldId: string | null): void {
     if (!this.editorMode) {
       return;
     }
@@ -1241,27 +1284,35 @@ export class GameApp {
       return;
     }
 
-    const currentTemplateId = this.readTemplateId(selectedSphere);
-    const nextTemplateId = this.stepTemplateId(currentTemplateId, delta, true);
-    if (nextTemplateId === currentTemplateId) {
-      return;
-    }
+    const nextInstanceWorldId = this.normalizeInstanceWorldIdChoice(instanceWorldId);
+    const nextTemplateId =
+      decodeTemplateIdFromInstanceWorldId(nextInstanceWorldId) ?? TEMPLATE_NONE_ID;
 
-    const changed = this.worldStore.apply({
+    const dimensionsChanged = this.worldStore.apply({
       type: "updateSphereDimensions",
       sphereId: selectedSphere.id,
       dimensions: {
         [SUBWORLD_TEMPLATE_DIMENSION]: nextTemplateId,
       },
     });
+    const instanceWorldChanged = this.worldStore.apply({
+      type: "updateSphereInstanceWorld",
+      sphereId: selectedSphere.id,
+      instanceWorldId: nextInstanceWorldId,
+    });
 
-    if (!changed) {
+    if (!dimensionsChanged && !instanceWorldChanged) {
       return;
     }
 
-    this.queueUpdateDimensionsOperation(selectedSphere.id, {
-      [SUBWORLD_TEMPLATE_DIMENSION]: nextTemplateId,
-    });
+    if (dimensionsChanged) {
+      this.queueUpdateDimensionsOperation(selectedSphere.id, {
+        [SUBWORLD_TEMPLATE_DIMENSION]: nextTemplateId,
+      });
+    }
+    if (instanceWorldChanged) {
+      this.queueUpdateInstanceWorldOperation(selectedSphere.id, nextInstanceWorldId);
+    }
     this.refreshPendingSaveMessage();
     this.updateTemplateHud();
   }
@@ -1297,14 +1348,31 @@ export class GameApp {
   }
 
   private updateTemplateHud(): void {
+    const normalizedCreateInstanceWorldId = this.normalizeInstanceWorldIdChoice(
+      this.createInstanceWorldId,
+    );
+    if (normalizedCreateInstanceWorldId !== this.createInstanceWorldId) {
+      this.createInstanceWorldId = normalizedCreateInstanceWorldId;
+      this.createTemplateId =
+        decodeTemplateIdFromInstanceWorldId(normalizedCreateInstanceWorldId) ??
+        TEMPLATE_NONE_ID;
+    }
+
     const selectedSphere = this.getSelectedEditableSphere();
-    const selectedTemplateId = this.readTemplateId(selectedSphere);
+    const selectedInstanceWorldId = selectedSphere
+      ? this.normalizeInstanceWorldIdChoice(selectedSphere.instanceWorldId)
+      : undefined;
     const selectedSphereColor = this.readSphereColorChannels(selectedSphere);
+    const availableInstanceWorldIds = this.listInstanceWorldChoices([
+      normalizedCreateInstanceWorldId,
+      selectedInstanceWorldId,
+    ]);
 
     this.templateHudPanel.render({
       editorMode: this.editorMode,
-      createTemplateId: this.createTemplateId,
-      selectedTemplateId: selectedSphere ? selectedTemplateId : null,
+      createInstanceWorldId: normalizedCreateInstanceWorldId,
+      selectedInstanceWorldId,
+      availableInstanceWorldIds,
       avatarLabel: avatarLabel(this.selectedAvatarId),
       selectedColorValue: this.encodeColorInputValue(selectedSphereColor),
     });
@@ -1346,7 +1414,7 @@ export class GameApp {
         if (this.worldNavigationStack[this.worldNavigationStack.length - 1] !== this.currentWorldId) {
           this.worldNavigationStack.push(this.currentWorldId);
         }
-        this.createTemplateId = TEMPLATE_NONE_ID;
+        this.setCreateInstanceWorldId(null);
         this.stopDraggingSphere();
         await this.selectWorldLevel(targetWorldId, true);
         return;

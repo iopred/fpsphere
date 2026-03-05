@@ -88,6 +88,10 @@ pub enum CommitOperation {
         sphere_id: String,
         dimensions: BTreeMap<String, f32>,
     },
+    UpdateInstanceWorld {
+        sphere_id: String,
+        instance_world_id: Option<String>,
+    },
     UpdateRadius {
         sphere_id: String,
         radius: f32,
@@ -419,6 +423,7 @@ impl WorldRepository {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn create_world(
         &mut self,
         world_id_input: &str,
@@ -447,6 +452,27 @@ impl WorldRepository {
 
         self.masters.insert(world_id, next_world.clone());
         Ok(next_world)
+    }
+
+    pub fn create_world_from_seed(
+        &mut self,
+        world_id_input: &str,
+        mut seed_world: WorldSnapshot,
+    ) -> Result<WorldSnapshot, WorldMutationFailure> {
+        Self::validate_world_id(world_id_input)?;
+        let world_id = world_id_input.trim().to_string();
+        if self.masters.contains_key(&world_id) {
+            return Err(WorldMutationFailure::WorldAlreadyExists {
+                message: format!("world '{}' already exists", world_id),
+            });
+        }
+
+        seed_world.world_id = world_id.clone();
+        seed_world.tick = 0;
+        normalize_world_snapshot_runtime(&mut seed_world);
+
+        self.masters.insert(world_id, seed_world.clone());
+        Ok(seed_world)
     }
 
     pub fn delete_world(&mut self, world_id_input: &str) -> Result<(), WorldMutationFailure> {
@@ -672,8 +698,45 @@ fn normalize_world_instance_world_references(world: &mut WorldSnapshot) {
 }
 
 fn normalize_world_snapshot_runtime(world: &mut WorldSnapshot) {
+    ensure_world_has_root(world);
     compact_shared_template_legacy_descendants(world);
     normalize_world_instance_world_references(world);
+}
+
+fn ensure_world_has_root(world: &mut WorldSnapshot) {
+    if world
+        .entities
+        .iter()
+        .any(|entity| entity.parent_id.is_none())
+    {
+        return;
+    }
+
+    if let Some(existing_root_index) = world
+        .entities
+        .iter()
+        .position(|entity| entity.id == "sphere-world-001")
+    {
+        world.entities[existing_root_index].parent_id = None;
+        return;
+    }
+
+    let mut dimensions = BTreeMap::new();
+    dimensions.insert("money".to_string(), 0.0);
+
+    world.entities.push(SphereEntity {
+        id: "sphere-world-001".to_string(),
+        parent_id: None,
+        radius: 60.0,
+        position_3d: [0.0, 0.0, 0.0],
+        dimensions,
+        instance_world_id: None,
+        time_window: TimeWindow {
+            start_tick: 0,
+            end_tick: None,
+        },
+        tags: vec!["world".to_string()],
+    });
 }
 
 fn compact_shared_template_legacy_descendants(world: &mut WorldSnapshot) {
@@ -886,6 +949,28 @@ fn apply_commit_operations(
                 for (key, value) in dimensions {
                     entity.dimensions.insert(key.clone(), *value);
                 }
+            }
+
+            CommitOperation::UpdateInstanceWorld {
+                sphere_id,
+                instance_world_id,
+            } => {
+                let entity = world.entities.iter_mut().find(|item| item.id == *sphere_id);
+                let entity = match entity {
+                    Some(value) => value,
+                    None => {
+                        return Err(vec![format!(
+                            "update_instance_world failed: sphere '{}' does not exist",
+                            sphere_id
+                        )])
+                    }
+                };
+
+                entity.instance_world_id = instance_world_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string);
             }
 
             CommitOperation::UpdateRadius { sphere_id, radius } => {
@@ -1133,7 +1218,7 @@ pub fn example_seed_world_snapshots() -> Vec<WorldSnapshot> {
 mod tests {
     use super::{
         example_world_snapshot, CommitOperation, CommitRequest, CommitTarget, SphereEntity,
-        TemporalWorldQuery, TimeWindow, WorldMutationFailure, WorldRepository,
+        TemporalWorldQuery, TimeWindow, WorldMutationFailure, WorldRepository, WorldSnapshot,
     };
     use std::collections::BTreeMap;
 
@@ -1290,6 +1375,96 @@ mod tests {
             .expect("created world should be readable");
         assert_eq!(loaded.world_id, "world-beta");
         assert_eq!(loaded.tick, 0);
+    }
+
+    #[test]
+    fn create_world_from_seed_does_not_clone_runtime_world_main_edits() {
+        let mut repository = WorldRepository::new(example_world_snapshot());
+        let runtime_only_sphere = make_test_sphere("sphere-runtime-only-001");
+
+        let response = repository
+            .commit(
+                "world-main",
+                CommitRequest {
+                    user_id: "alice".to_string(),
+                    base_tick: 0,
+                    operations: vec![CommitOperation::Create {
+                        sphere: runtime_only_sphere.clone(),
+                    }],
+                },
+            )
+            .expect("master commit should succeed");
+        assert!(response
+            .world
+            .entities
+            .iter()
+            .any(|entity| entity.id == runtime_only_sphere.id));
+
+        let created = repository
+            .create_world_from_seed("world-beta", example_world_snapshot())
+            .expect("create world from seed should succeed");
+
+        assert_eq!(created.world_id, "world-beta");
+        assert!(!created
+            .entities
+            .iter()
+            .any(|entity| entity.id == runtime_only_sphere.id));
+    }
+
+    #[test]
+    fn get_world_snapshot_heals_world_without_root_entity() {
+        let mut repository = WorldRepository::new_with_worlds(vec![
+            example_world_snapshot(),
+            WorldSnapshot {
+                world_id: "world-template-2".to_string(),
+                tick: 0,
+                entities: Vec::new(),
+            },
+        ])
+        .expect("repository should construct");
+
+        // Also verify commit path can operate against the healed world.
+        let commit = repository
+            .commit(
+                "world-template-2",
+                CommitRequest {
+                    user_id: "alice".to_string(),
+                    base_tick: 0,
+                    operations: vec![CommitOperation::Create {
+                        sphere: SphereEntity {
+                            id: "sphere-user-world-template-2-001".to_string(),
+                            parent_id: Some("sphere-world-001".to_string()),
+                            radius: 2.0,
+                            position_3d: [1.0, 0.0, 0.0],
+                            dimensions: BTreeMap::new(),
+                            instance_world_id: None,
+                            time_window: TimeWindow {
+                                start_tick: 0,
+                                end_tick: None,
+                            },
+                            tags: vec!["user-created".to_string()],
+                        },
+                    }],
+                },
+            )
+            .expect("commit should succeed after root healing");
+        assert!(commit
+            .world
+            .entities
+            .iter()
+            .any(|entity| entity.id == "sphere-world-001" && entity.parent_id.is_none()));
+
+        let snapshot = repository
+            .get_world_snapshot("world-template-2", None)
+            .expect("snapshot should be present");
+        assert!(snapshot
+            .entities
+            .iter()
+            .any(|entity| entity.id == "sphere-world-001" && entity.parent_id.is_none()));
+        assert!(snapshot
+            .entities
+            .iter()
+            .any(|entity| entity.id == "sphere-user-world-template-2-001"));
     }
 
     #[test]
@@ -1940,6 +2115,36 @@ mod tests {
             .expect("updated sphere");
         assert_eq!(updated.dimensions.get("world_template"), Some(&1.0));
         assert_eq!(updated.dimensions.get("world_scale"), Some(&0.5));
+    }
+
+    #[test]
+    fn commit_can_update_instance_world() {
+        let mut repository = WorldRepository::new(example_world_snapshot());
+
+        let response = repository
+            .commit(
+                "world-main",
+                CommitRequest {
+                    user_id: "alice".to_string(),
+                    base_tick: 0,
+                    operations: vec![CommitOperation::UpdateInstanceWorld {
+                        sphere_id: "sphere-building-001".to_string(),
+                        instance_world_id: Some(" world-template-3 ".to_string()),
+                    }],
+                },
+            )
+            .expect("commit should update instance world reference");
+
+        let updated = response
+            .world
+            .entities
+            .iter()
+            .find(|item| item.id == "sphere-building-001")
+            .expect("updated sphere");
+        assert_eq!(
+            updated.instance_world_id.as_deref(),
+            Some("world-template-3")
+        );
     }
 
     #[test]

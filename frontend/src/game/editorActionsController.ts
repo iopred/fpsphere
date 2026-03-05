@@ -20,6 +20,7 @@ export interface EditorActionsCallbacks {
   getPlayerPosition: () => THREE.Vector3;
   getCamera: () => THREE.Camera;
   getCreateTemplateId: () => number;
+  getCreateInstanceWorldId: () => string | null;
   getTick: () => number;
   getDefaultColorDimensions: () => Record<string, number>;
   randomMoney: () => number;
@@ -91,17 +92,18 @@ export class EditorActionsController {
     }
 
     const createTemplateId = this.callbacks.getCreateTemplateId();
+    const createInstanceWorldId = this.callbacks.getCreateInstanceWorldId()?.trim() || null;
     const dimensions: Record<string, number> = {
       money: this.callbacks.randomMoney(),
       [this.config.subworldTemplateDimension]: createTemplateId,
       ...this.callbacks.getDefaultColorDimensions(),
     };
-    if (createTemplateId > this.config.templateNoneId) {
+    if (createInstanceWorldId || createTemplateId > this.config.templateNoneId) {
       dimensions[this.config.subworldScaleDimension] = 1;
     }
 
     const tags = ["user-created"];
-    if (createTemplateId > this.config.templateNoneId) {
+    if (createInstanceWorldId) {
       tags.push("world-instance");
     }
 
@@ -111,8 +113,7 @@ export class EditorActionsController {
       radius: createdSphereRadius,
       position3d: [center.x, center.y, center.z],
       dimensions,
-      instanceWorldId:
-        createTemplateId > this.config.templateNoneId ? `world-template-${createTemplateId}` : null,
+      instanceWorldId: createInstanceWorldId,
       timeWindow: {
         start: this.callbacks.getTick(),
         end: null,

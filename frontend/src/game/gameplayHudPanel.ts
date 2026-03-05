@@ -58,7 +58,7 @@ export class GameplayHudPanel {
   renderHint(editorMode: boolean): void {
     if (editorMode) {
       this.hintNode.textContent =
-        "EDIT MODE | ~ exit editor | C create | E select | F enter selected template / exit | Q deselect | Z delete | wheel resize | hold RMB drag | hold R + mouse rotate template | Cmd/Ctrl+S save";
+        "EDIT MODE | ~ exit editor | C create | E select | F enter selected world instance / exit | Q deselect | Z delete | world instance is selected from the editor panel | wheel resize | hold RMB drag | hold R + mouse rotate template | Cmd/Ctrl+S save";
       return;
     }
 

@@ -83,6 +83,11 @@ type BackendCommitOperation =
       dimensions: Record<string, number>;
     }
   | {
+      type: "update_instance_world";
+      sphere_id: string;
+      instance_world_id: string | null;
+    }
+  | {
       type: "update_radius";
       sphere_id: string;
       radius: number;
@@ -117,6 +122,11 @@ export type WorldCommitOperation =
       type: "updateDimensions";
       sphereId: string;
       dimensions: Record<string, number>;
+    }
+  | {
+      type: "updateInstanceWorld";
+      sphereId: string;
+      instanceWorldId: string | null;
     }
   | {
       type: "updateRadius";
@@ -230,6 +240,12 @@ function toBackendCommitOperation(operation: WorldCommitOperation): BackendCommi
         type: "update_dimensions",
         sphere_id: operation.sphereId,
         dimensions: operation.dimensions,
+      };
+    case "updateInstanceWorld":
+      return {
+        type: "update_instance_world",
+        sphere_id: operation.sphereId,
+        instance_world_id: operation.instanceWorldId,
       };
     case "updateRadius":
       return {
