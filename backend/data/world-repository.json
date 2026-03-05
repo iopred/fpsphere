@@ -1292,6 +1292,16 @@
           ]
         }
       ]
+    },
+    {
+      "world_id": "world-template-2",
+      "tick": 0,
+      "entities": []
+    },
+    {
+      "world_id": "world-template-3",
+      "tick": 0,
+      "entities": []
     }
   ],
   "user_worlds": [],
