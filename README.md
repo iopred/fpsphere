@@ -141,6 +141,20 @@ Then reload Caddy:
 Reference config file:
 - `deploy/Caddyfile.example`
 
+## Makefile shortcuts
+
+From repo root:
+
+- `make up`: build and start Docker services
+- `make down`: stop services (keeps named volumes)
+- `make restart`: restart services
+- `make rebuild`: force recreate with build
+- `make logs`: follow logs
+- `make ps`: show service status
+- `make config`: validate/render compose config
+- `make clean`: `down` + prune dangling Docker resources
+- `make clean-all`: remove services, volumes, and unused Docker resources
+
 ## Current milestone status
 
 - M0 foundations: complete.
