@@ -152,9 +152,9 @@ Exit criteria:
 - Add delta snapshot transport with full-snapshot fallback.
 - Reduce irrelevant update traffic (for example, template editing should not stream unrelated world updates).
 
-## 5. Multi-Agent Workstreams
+## 5. Workstreams (Historical Reference)
 
-Each workstream below is intentionally parallelizable. Task IDs are dependency-aware so multiple agents can execute concurrently.
+The workstreams below capture ownership areas and dependency order used during delivery.
 
 ## Workstream A: Backend (Rust)
 
@@ -183,12 +183,13 @@ Delivers: simulation module + test suite
 Depends on: A1, A2  
 Delivers: networking module + integration test harness
 
-### [ ] A4. Persistence adapter boundary
-- Define datastore adapter traits/interfaces.
-- Provide in-memory adapter for M1/M2.
+### [x] A4. Persistence adapter + datastore integration
+- Define repository persistence boundary.
+- Add file-backed JSON datastore with startup restore and mutation persistence.
+- Add backend admin reset flow that restores seed data and notifies clients to reload.
 
 Depends on: A1  
-Delivers: adapter interfaces + mock implementation
+Delivers: datastore integration, persistence flows, and admin reset/reload signaling
 
 ## Workstream B: Frontend Data Store Runtime (TypeScript)
 
@@ -346,18 +347,15 @@ Status: achieved in the current prototype build.
 5. Risk: Keyboard layout differences break editor shortcuts.
    Mitigation: use layout-aware keybinding abstraction and test matrix for Dvorak/QWERTY.
 
-## 10. Agent Execution Plan (Immediate)
+## 10. Implementation Sequence (Historical)
 
-Run three agents in parallel after M0 bootstrap:
+Planned sequence used during early milestone execution:
 
-1. Agent-Backend: execute A1 then A4 stubs.
-2. Agent-DataRuntime: execute B1 then B2 skeleton, then B5 edit mutation pipeline.
-3. Agent-Rendering: execute C1 then C2 prototype, then C6 editor interactions.
-
-Then merge for integration sprint:
-
-4. Agent-Integration: wire B2 -> C3 and B3 -> C4, complete C5 demo.
-5. Agent-QA: create deterministic test scenarios, including Dvorak/QWERTY shortcut verification.
+1. Backend track: execute A1 then A4 stubs.
+2. Data runtime track: execute B1 then B2 skeleton, then B5 edit mutation pipeline.
+3. Rendering track: execute C1 then C2 prototype, then C6 editor interactions.
+4. Integration track: wire B2 -> C3 and B3 -> C4, complete C5 demo.
+5. QA track: create deterministic test scenarios, including Dvorak/QWERTY shortcut verification.
 
 ## 11. First Sprint Checklist
 
@@ -491,3 +489,48 @@ Goal: reduce bandwidth/latency by interest-managed and delta-encoded updates.
 - [x] `S5-N3` Add delta snapshot protocol with baseline tracking and fallback full snapshots.
 - [x] `S5-N4` Ensure template-focused editing suppresses unrelated large-world update streams.
 - [ ] `S5-N5` Add bandwidth/latency acceptance checks for AOI + delta mode.
+
+## 14. Future Sprint Suggestions
+
+### 14.1 Avatar Asset Pipeline + Presets
+
+Goal: make avatar customization easier to author, share, and ship.
+
+- Add import/export flow for avatar JSON from avatar editor mode.
+- Add “set as project default” workflow for duck/human/default variants.
+- Add curated preset library (duck-like, human-like, stylized variants) with per-preset metadata.
+- Add multiplayer-safe avatar fallback behavior when a preset is missing on a client.
+
+### 14.2 Temporal Authoring + Playback UX
+
+Goal: make `time_window` practical for editing workflows and visual feedback.
+
+- Add timeline scrubber in editor for previewing temporal states.
+- Add template placement playback controls (speed, repeat, easing profile).
+- Add temporal diff/ghost visualization between selected ticks.
+- Add deterministic temporal playback integration tests for editor interactions.
+
+### 14.3 AOI Expansion for World-Entity Streams
+
+Goal: extend AOI benefits beyond player snapshots to world-edit data flows.
+
+- Apply AOI partitioning/filtering to world-entity update streams.
+- Keep template editing sessions isolated from unrelated large-world updates.
+- Add profiling and acceptance thresholds for update fanout, payload size, and tick latency.
+
+### 14.4 Persistence Hardening + Operations
+
+Goal: make datastore behavior safer for longer-running and production-like use.
+
+- Add datastore schema migration/version upgrade path.
+- Add periodic backup snapshots and restore tooling.
+- Add startup integrity checks with clear fallback/repair behavior.
+- Add load/save/reset smoke tests against persisted datasets.
+
+### 14.5 Security + Admin Control Plane (Prerequisite for Remote Admin APIs)
+
+Goal: safely unlock remote admin actions after authentication/authorization exists.
+
+- Add baseline authn/authz model for admin actions.
+- Add audit logging for reset, world mutation, and datastore restore actions.
+- After auth is in place, add protected admin endpoints (e.g., remote reset/reload).
