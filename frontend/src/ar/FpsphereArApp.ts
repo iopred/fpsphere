@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { SphereEntity } from "@fpsphere/shared-types";
 import { fetchWorldSeed, parseLoadedWorldSnapshot } from "../game/worldApi";
-import { buildSeedWorld } from "../game/worldSeed";
+import { buildSeedWorld, type SeedWorld } from "../game/worldSeed";
 import {
   MultiplayerClient,
   type MultiplayerServerResetNotice,
@@ -21,15 +21,14 @@ import {
   planRemoteAvatarWorldSwitch,
 } from "../game/remoteAvatarLifecycle";
 import { LocalWorldStore, type WorldStoreSnapshot } from "../game/worldStore";
-import { resolveTemplateIdFromEntity } from "../game/worldInstanceRefs";
 import {
-  getTemplateRootSphereId,
-  instantiateSubworldChildren,
-  SUBWORLD_SCALE_DIMENSION,
-  SUBWORLD_TEMPLATE_DIMENSION,
-  TEMPLATE_DEFINITION_TAG,
-  TEMPLATE_ROOT_TAG,
-} from "../game/subworldTemplates";
+  cloneSphereEntity,
+  DEFAULT_WORLD_INSTANCE_RENDER_DEPTH,
+  expandWorldRenderEntities,
+  isPortalHostSphere,
+  isTemplateRootSphere,
+  worldReferencesInstancedWorld,
+} from "../game/worldRenderPipeline";
 import {
   DEFAULT_MARKER_SIZE_METERS,
   DEFAULT_WORLD_SCALE_MULTIPLIER,
@@ -46,7 +45,14 @@ const POSE_SLERP_FACTOR = 0.3;
 const WORLD_RENDER_RADIUS_METERS = 0.06;
 const WORLD_RENDER_LIFT_METERS = 0.045;
 const JSQR_CDN_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";
-const TEMPLATE_NONE_ID = 0;
+const SPHERE_COLOR_RED_DIMENSION = "r";
+const SPHERE_COLOR_GREEN_DIMENSION = "g";
+const SPHERE_COLOR_BLUE_DIMENSION = "b";
+const DEFAULT_SPHERE_COLOR_HEX = 0x78849b;
+const DEFAULT_SPHERE_COLOR = new THREE.Color(DEFAULT_SPHERE_COLOR_HEX);
+const DEFAULT_SPHERE_COLOR_RED = DEFAULT_SPHERE_COLOR.r;
+const DEFAULT_SPHERE_COLOR_GREEN = DEFAULT_SPHERE_COLOR.g;
+const DEFAULT_SPHERE_COLOR_BLUE = DEFAULT_SPHERE_COLOR.b;
 
 interface BarcodeCornerPointLike {
   x: number;
@@ -247,6 +253,12 @@ interface ArObstacle {
   instancedSubworld: boolean;
 }
 
+interface SphereColorChannels {
+  r: number;
+  g: number;
+  b: number;
+}
+
 function toCornerPoints(detection: DetectedBarcodeLike): CornerPoint[] {
   if (Array.isArray(detection.cornerPoints) && detection.cornerPoints.length >= 4) {
     return detection.cornerPoints
@@ -298,6 +310,8 @@ export class FpsphereArApp {
   private parentMesh: THREE.Mesh | null = null;
   private readonly obstaclesById = new Map<string, ArObstacle>();
   private readonly obstacleMeshes = new Map<string, THREE.Mesh>();
+  private readonly instancedWorldById = new Map<string, SeedWorld>();
+  private readonly instancedWorldLoadInFlight = new Set<string>();
 
   private readonly multiplayerClient = new MultiplayerClient();
   private readonly remotePlayers = new Map<string, RemotePlayerState>();
@@ -851,23 +865,45 @@ export class FpsphereArApp {
   }
 
   private applyMultiplayerWorldCommit(commit: MultiplayerWorldCommit): void {
-    if (commit.world_id !== this.currentWorldId) {
+    if (commit.saved_to === "user" && commit.user_id !== this.userId) {
       return;
     }
 
-    if (commit.saved_to === "user" && commit.user_id !== this.userId) {
+    const commitTargetsCurrentWorld = commit.world_id === this.currentWorldId;
+    const shouldRefreshInstancedWorld =
+      !commitTargetsCurrentWorld &&
+      (this.instancedWorldById.has(commit.world_id) ||
+        this.currentWorldReferencesInstancedWorld(commit.world_id));
+    if (!commitTargetsCurrentWorld && !shouldRefreshInstancedWorld) {
       return;
     }
 
     try {
       const loaded = parseLoadedWorldSnapshot(commit.world);
-      this.worldStore.apply({
-        type: "hydrateWorld",
-        world: loaded.world,
+      if (commitTargetsCurrentWorld) {
+        this.worldStore.apply({
+          type: "hydrateWorld",
+          world: loaded.world,
+        });
+        return;
+      }
+
+      this.instancedWorldById.set(commit.world_id, {
+        parent: cloneSphereEntity(loaded.world.parent),
+        children: loaded.world.children.map((entity) => cloneSphereEntity(entity)),
       });
+      this.syncObstaclesFromSnapshot(this.worldStore.getSnapshot());
     } catch (error) {
       console.warn("AR world sync failed", error);
     }
+  }
+
+  private currentWorldReferencesInstancedWorld(worldIdInput: string): boolean {
+    return worldReferencesInstancedWorld({
+      worldIdInput,
+      snapshot: this.worldStore.getSnapshot(),
+      listDescendantsOf: (sphereId) => this.worldStore.listDescendantsOf(sphereId),
+    });
   }
 
   private upsertRemotePlayerMesh(remotePlayer: RemotePlayerState): void {
@@ -934,10 +970,26 @@ export class FpsphereArApp {
     this.refreshWorldRenderScale();
 
     this.syncObstaclesFromSnapshot(snapshot);
+    this.cacheCurrentWorldDefinition();
     for (const remotePlayer of this.remotePlayers.values()) {
       this.upsertRemotePlayerMesh(remotePlayer);
     }
   };
+
+  private cacheCurrentWorldDefinition(): void {
+    if (!this.currentWorldId) {
+      return;
+    }
+
+    const root = this.worldStore.getRootSphere();
+    const descendants = this.worldStore
+      .listDescendantsOf(root.id)
+      .map((entity) => cloneSphereEntity(entity));
+    this.instancedWorldById.set(this.currentWorldId, {
+      parent: cloneSphereEntity(root),
+      children: descendants,
+    });
+  }
 
   private refreshWorldRenderScale(): void {
     const safeRadius = Math.max(this.parentSphere.radius, 0.001);
@@ -965,169 +1017,117 @@ export class FpsphereArApp {
     };
   }
 
-  private readTemplateId(entity: SphereEntity | null): number {
-    return Math.max(
-      TEMPLATE_NONE_ID,
-      resolveTemplateIdFromEntity(entity) ?? TEMPLATE_NONE_ID,
-    );
-  }
-
-  private isTemplateRootSphere(entity: SphereEntity): boolean {
-    return entity.tags.includes(TEMPLATE_ROOT_TAG);
-  }
-
-  private getTemplateRootSphere(templateId: number): SphereEntity | null {
-    if (templateId <= TEMPLATE_NONE_ID) {
-      return null;
+  private readNormalizedColorChannel(value: unknown, fallback: number): number {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return fallback;
     }
 
-    return this.worldStore.getSphereById(getTemplateRootSphereId(templateId));
+    return Math.max(0, Math.min(1, value));
   }
 
-  private hasSharedTemplateDefinition(templateId: number): boolean {
-    const templateRoot = this.getTemplateRootSphere(templateId);
-    if (!templateRoot) {
-      return false;
-    }
-
-    return this.worldStore.listChildrenOf(templateRoot.id).length > 0;
+  private readSphereColorChannels(entity: SphereEntity | null): SphereColorChannels {
+    return {
+      r: this.readNormalizedColorChannel(
+        entity?.dimensions[SPHERE_COLOR_RED_DIMENSION],
+        DEFAULT_SPHERE_COLOR_RED,
+      ),
+      g: this.readNormalizedColorChannel(
+        entity?.dimensions[SPHERE_COLOR_GREEN_DIMENSION],
+        DEFAULT_SPHERE_COLOR_GREEN,
+      ),
+      b: this.readNormalizedColorChannel(
+        entity?.dimensions[SPHERE_COLOR_BLUE_DIMENSION],
+        DEFAULT_SPHERE_COLOR_BLUE,
+      ),
+    };
   }
 
-  private resolveTemplateHostScale(hostSphere: SphereEntity, templateRootRadius: number): number {
-    if (!Number.isFinite(templateRootRadius) || templateRootRadius <= 0) {
-      return 0;
-    }
-
-    const baseScale = hostSphere.radius / templateRootRadius;
-    if (!Number.isFinite(baseScale) || baseScale <= 0) {
-      return 0;
-    }
-
-    const dimensionScale = hostSphere.dimensions[SUBWORLD_SCALE_DIMENSION];
-    const extraScale = Number.isFinite(dimensionScale) && dimensionScale > 0 ? dimensionScale : 1;
-
-    return baseScale * extraScale;
+  private setObstacleMeshColorChannels(
+    obstacleMesh: THREE.Mesh,
+    colorChannels: SphereColorChannels,
+  ): void {
+    obstacleMesh.userData.colorR = colorChannels.r;
+    obstacleMesh.userData.colorG = colorChannels.g;
+    obstacleMesh.userData.colorB = colorChannels.b;
   }
 
-  private instantiateSharedTemplateChildren(hostSpheres: SphereEntity[]): SphereEntity[] {
-    const derived: SphereEntity[] = [];
+  private readObstacleMeshColorChannels(obstacleMesh: THREE.Mesh): SphereColorChannels {
+    return {
+      r: this.readNormalizedColorChannel(obstacleMesh.userData.colorR, DEFAULT_SPHERE_COLOR_RED),
+      g: this.readNormalizedColorChannel(obstacleMesh.userData.colorG, DEFAULT_SPHERE_COLOR_GREEN),
+      b: this.readNormalizedColorChannel(obstacleMesh.userData.colorB, DEFAULT_SPHERE_COLOR_BLUE),
+    };
+  }
 
-    for (const hostSphere of hostSpheres) {
-      const templateId = this.readTemplateId(hostSphere);
-      if (templateId <= TEMPLATE_NONE_ID) {
-        continue;
-      }
+  private ensureInstancedWorldLoaded(worldIdInput: string): void {
+    const worldId = worldIdInput.trim();
+    if (worldId.length === 0 || worldId === this.currentWorldId) {
+      return;
+    }
+    if (this.instancedWorldById.has(worldId) || this.instancedWorldLoadInFlight.has(worldId)) {
+      return;
+    }
 
-      const templateRoot = this.getTemplateRootSphere(templateId);
-      if (!templateRoot) {
-        continue;
-      }
+    this.instancedWorldLoadInFlight.add(worldId);
+    void fetchWorldSeed(worldId)
+      .then((loaded) => {
+        if (!this.running) {
+          return;
+        }
 
-      const templateChildren = this.worldStore.listChildrenOf(templateRoot.id);
-      if (templateChildren.length === 0) {
-        continue;
-      }
-
-      const hostScale = this.resolveTemplateHostScale(hostSphere, templateRoot.radius);
-      if (hostScale <= 0) {
-        continue;
-      }
-
-      for (const templateChild of templateChildren) {
-        const offsetX = templateChild.position3d[0] - templateRoot.position3d[0];
-        const offsetY = templateChild.position3d[1] - templateRoot.position3d[1];
-        const offsetZ = templateChild.position3d[2] - templateRoot.position3d[2];
-
-        derived.push({
-          id: `${hostSphere.id}::template-${templateId}::entity-${templateChild.id}`,
-          parentId: hostSphere.id,
-          radius: Math.max(0.05, templateChild.radius * hostScale),
-          position3d: [
-            hostSphere.position3d[0] + offsetX * hostScale,
-            hostSphere.position3d[1] + offsetY * hostScale,
-            hostSphere.position3d[2] + offsetZ * hostScale,
-          ],
-          dimensions: { ...templateChild.dimensions },
-          timeWindow: { ...hostSphere.timeWindow },
-          tags: [
-            ...templateChild.tags.filter(
-              (tag) =>
-                tag !== TEMPLATE_DEFINITION_TAG &&
-                tag !== TEMPLATE_ROOT_TAG &&
-                tag !== "instanced-subworld",
-            ),
-            "instanced-subworld",
-            `template-${templateId}`,
-          ],
+        this.instancedWorldById.set(worldId, {
+          parent: cloneSphereEntity(loaded.world.parent),
+          children: loaded.world.children.map((entity) => cloneSphereEntity(entity)),
         });
-      }
-    }
-
-    return derived;
+        this.syncObstaclesFromSnapshot(this.worldStore.getSnapshot());
+      })
+      .catch((error) => {
+        if (this.running) {
+          console.warn(`Failed to load instanced world "${worldId}"`, error);
+        }
+      })
+      .finally(() => {
+        this.instancedWorldLoadInFlight.delete(worldId);
+      });
   }
 
   private syncObstaclesFromSnapshot(snapshot: WorldStoreSnapshot): void {
-    const rootView = snapshot.parent.parentId === null;
-    const visibleChildren = rootView
-      ? snapshot.children.filter((child) => !this.isTemplateRootSphere(child))
-      : snapshot.children;
-    const templateHosts = rootView
-      ? [snapshot.parent, ...visibleChildren]
-      : [...visibleChildren];
-    const expandedChildren: SphereEntity[] = [];
-    const expandedIds = new Set<string>();
-
-    const pushExpanded = (entity: SphereEntity): void => {
-      if (expandedIds.has(entity.id)) {
-        return;
-      }
-      expandedChildren.push(entity);
-      expandedIds.add(entity.id);
-    };
-
-    for (const child of visibleChildren) {
-      pushExpanded(child);
-    }
-
-    for (const child of visibleChildren) {
-      const templateId = this.readTemplateId(child);
-      if (templateId > TEMPLATE_NONE_ID && this.hasSharedTemplateDefinition(templateId)) {
-        continue;
-      }
-      for (const descendant of this.worldStore.listDescendantsOf(child.id)) {
-        pushExpanded(descendant);
-      }
-    }
-
-    for (const instancedChild of this.instantiateSharedTemplateChildren(templateHosts)) {
-      pushExpanded(instancedChild);
-    }
-
-    const fallbackTemplateHosts = templateHosts.filter((host) => {
-      const templateId = this.readTemplateId(host);
-      return templateId > TEMPLATE_NONE_ID && !this.hasSharedTemplateDefinition(templateId);
+    const expandedChildren = expandWorldRenderEntities({
+      snapshot,
+      currentWorldId: this.currentWorldId,
+      listChildrenOf: (sphereId) => this.worldStore.listChildrenOf(sphereId),
+      listDescendantsOf: (sphereId) => this.worldStore.listDescendantsOf(sphereId),
+      getSphereById: (sphereId) => this.worldStore.getSphereById(sphereId),
+      instancedWorldById: this.instancedWorldById,
+      ensureInstancedWorldLoaded: (worldId) => this.ensureInstancedWorldLoaded(worldId),
+      worldInstanceRenderDepth: DEFAULT_WORLD_INSTANCE_RENDER_DEPTH,
+      colorConfig: {
+        defaultColorChannels: {
+          r: DEFAULT_SPHERE_COLOR_RED,
+          g: DEFAULT_SPHERE_COLOR_GREEN,
+          b: DEFAULT_SPHERE_COLOR_BLUE,
+        },
+        colorDimensionKeys: {
+          red: SPHERE_COLOR_RED_DIMENSION,
+          green: SPHERE_COLOR_GREEN_DIMENSION,
+          blue: SPHERE_COLOR_BLUE_DIMENSION,
+        },
+      },
     });
-
-    for (const instancedChild of instantiateSubworldChildren(fallbackTemplateHosts)) {
-      pushExpanded(instancedChild);
-    }
 
     const nextIds = new Set<string>();
 
     for (const entity of expandedChildren) {
       nextIds.add(entity.id);
       const instancedSubworld = entity.tags.includes("instanced-subworld");
-      const templateId = entity.dimensions[SUBWORLD_TEMPLATE_DIMENSION];
-      const portalHost =
-        entity.parentId === snapshot.parent.id &&
-        Number.isFinite(templateId) &&
-        Math.trunc(templateId) > TEMPLATE_NONE_ID;
+      const colorChannels = this.readSphereColorChannels(entity);
+      const portalHost = isPortalHostSphere(entity);
 
       const existingBody = this.obstaclesById.get(entity.id);
       if (!existingBody) {
         const body = this.buildObstacleBody(entity, portalHost, instancedSubworld);
         this.obstaclesById.set(entity.id, body);
-        this.addObstacleMesh(body);
+        this.addObstacleMesh(body, colorChannels);
         continue;
       }
 
@@ -1146,6 +1146,7 @@ export class FpsphereArApp {
         );
         existingMesh.scale.setScalar(existingBody.radius);
         existingMesh.userData.portalHost = existingBody.portalHost;
+        this.setObstacleMeshColorChannels(existingMesh, colorChannels);
       }
     }
 
@@ -1160,7 +1161,10 @@ export class FpsphereArApp {
     this.recolorObstacles();
   }
 
-  private addObstacleMesh(obstacle: ArObstacle): void {
+  private addObstacleMesh(
+    obstacle: ArObstacle,
+    colorChannels: SphereColorChannels,
+  ): void {
     const sphereGeometry = new THREE.SphereGeometry(1, 24, 18);
     const sphereMaterial = new THREE.MeshStandardMaterial({
       color: 0x7082a1,
@@ -1176,6 +1180,7 @@ export class FpsphereArApp {
     obstacleMesh.scale.setScalar(obstacle.radius);
     obstacleMesh.userData.sphereId = obstacle.id;
     obstacleMesh.userData.portalHost = obstacle.portalHost;
+    this.setObstacleMeshColorChannels(obstacleMesh, colorChannels);
     this.worldContentGroup.add(obstacleMesh);
     this.obstacleMeshes.set(obstacle.id, obstacleMesh);
   }
@@ -1212,7 +1217,12 @@ export class FpsphereArApp {
       }
 
       obstacleMesh.visible = true;
-      obstacleMesh.material.color.setHex(0x78849b);
+      const baseColorChannels = this.readObstacleMeshColorChannels(obstacleMesh);
+      obstacleMesh.material.color.setRGB(
+        baseColorChannels.r,
+        baseColorChannels.g,
+        baseColorChannels.b,
+      );
       obstacleMesh.material.emissive.setHex(0x000000);
       obstacleMesh.material.transparent = false;
       obstacleMesh.material.opacity = 1;
