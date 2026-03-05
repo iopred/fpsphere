@@ -3,7 +3,7 @@
   "masters": [
     {
       "world_id": "world-main",
-      "tick": 8,
+      "tick": 10,
       "entities": [
         {
           "id": "sphere-world-001",
@@ -57,7 +57,10 @@
             14.0
           ],
           "dimensions": {
+            "b": 0.4275,
+            "g": 0.0941,
             "money": 0.35,
+            "r": 0.9255,
             "world_pitch": 0.055,
             "world_scale": 1.0,
             "world_template": 1.0,
@@ -360,10 +363,10 @@
             13.184
           ],
           "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
+            "b": 0.1647,
+            "g": 0.1647,
             "money": 0.686128,
-            "r": 0.18782078,
+            "r": 0.4745,
             "world_template": 0.0
           },
           "instance_world_id": null,
@@ -516,7 +519,7 @@
     },
     {
       "world_id": "world-template-1",
-      "tick": 2,
+      "tick": 3,
       "entities": [
         {
           "id": "sphere-template-world-001",
@@ -571,7 +574,10 @@
             -2.4
           ],
           "dimensions": {
+            "b": 0.3608,
+            "g": 0.9412,
             "money": 0.7,
+            "r": 0.0,
             "world_template": 2.0
           },
           "instance_world_id": "world-template-2",
@@ -593,7 +599,10 @@
             2.9
           ],
           "dimensions": {
-            "money": 1.0
+            "b": 0.349,
+            "g": 1.0,
+            "money": 1.0,
+            "r": 0.0
           },
           "instance_world_id": null,
           "time_window": {
@@ -883,7 +892,7 @@
     },
     {
       "world_id": "world-template-2",
-      "tick": 3,
+      "tick": 4,
       "entities": [
         {
           "id": "sphere-world-001",
@@ -1062,10 +1071,10 @@
             11.292
           ],
           "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
+            "b": 1.0,
+            "g": 1.0,
             "money": 0.06095674,
-            "r": 0.18782078,
+            "r": 1.0,
             "world_template": 0.0
           },
           "instance_world_id": null,
@@ -1087,10 +1096,10 @@
             10.997
           ],
           "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
+            "b": 1.0,
+            "g": 1.0,
             "money": 0.57925725,
-            "r": 0.18782078,
+            "r": 1.0,
             "world_template": 0.0
           },
           "instance_world_id": null,
@@ -1106,5 +1115,5 @@
     }
   ],
   "user_worlds": [],
-  "commit_seq": 13
+  "commit_seq": 18
 }

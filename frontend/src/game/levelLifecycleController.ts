@@ -204,6 +204,9 @@ export class LevelLifecycleController {
       await this.refreshAvailableWorldIds({
         preserveCurrentWorldId: !deletingCurrentWorld,
       });
+      this.availableWorldIds = this.normalizeWorldIds(
+        this.availableWorldIds.filter((availableWorldId) => availableWorldId !== worldId),
+      );
 
       if (deletingCurrentWorld) {
         const nextWorldId = this.availableWorldIds[0] ?? this.defaultWorldId;
@@ -247,16 +250,27 @@ export class LevelLifecycleController {
     this.callbacks.deselectSphere();
     this.callbacks.updateWorldQueryParam(worldId);
     this.renderLevelSelectHud();
-    this.callbacks.connectMultiplayer(worldId);
+    try {
+      try {
+        this.callbacks.connectMultiplayer(worldId);
+      } catch (error) {
+        console.warn(`Failed to connect multiplayer for "${worldId}"`, error);
+      }
 
-    await this.loadWorldFromBackend(worldId, requestVersion);
-    if (this.callbacks.isDisposed() || requestVersion !== this.worldLoadVersion) {
-      return;
+      await this.loadWorldFromBackend(worldId, requestVersion);
+      if (this.callbacks.isDisposed() || requestVersion !== this.worldLoadVersion) {
+        return;
+      }
+
+      this.callbacks.movePlayerToCurrentWorld();
+    } finally {
+      if (this.callbacks.isDisposed() || requestVersion !== this.worldLoadVersion) {
+        return;
+      }
+
+      this.loadingWorldId = null;
+      this.renderLevelSelectHud();
     }
-
-    this.loadingWorldId = null;
-    this.callbacks.movePlayerToCurrentWorld();
-    this.renderLevelSelectHud();
   }
 
   refreshPendingSaveMessage(): void {
