@@ -17,6 +17,7 @@
           "dimensions": {
             "money": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 0,
             "end_tick": null
@@ -37,6 +38,7 @@
           "dimensions": {
             "money": 0.1
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 0,
             "end_tick": null
@@ -58,6 +60,7 @@
             "money": 0.6,
             "world_template": 1.0
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 0,
             "end_tick": null
@@ -80,6 +83,7 @@
             "world_scale": 1.0,
             "world_template": 1.0
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 0,
             "end_tick": null
@@ -105,6 +109,7 @@
             "world_scale": 1.0,
             "world_template": 1.0
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 1825,
             "end_tick": null
@@ -126,6 +131,7 @@
           "dimensions": {
             "money": 0.08
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 1825,
             "end_tick": null
@@ -147,6 +153,7 @@
           "dimensions": {
             "money": 0.7
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 1825,
             "end_tick": null
@@ -168,6 +175,7 @@
           "dimensions": {
             "money": 1.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 1825,
             "end_tick": null
@@ -193,6 +201,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 1979,
             "end_tick": null
@@ -217,6 +226,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 2013,
             "end_tick": null
@@ -241,6 +251,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 2045,
             "end_tick": null
@@ -265,6 +276,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 2071,
             "end_tick": null
@@ -289,6 +301,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 2102,
             "end_tick": null
@@ -313,6 +326,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 2162,
             "end_tick": null
@@ -337,6 +351,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 2196,
             "end_tick": null
@@ -361,6 +376,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 2231,
             "end_tick": null
@@ -385,6 +401,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 2264,
             "end_tick": null
@@ -409,6 +426,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 2301,
             "end_tick": null
@@ -433,6 +451,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 2332,
             "end_tick": null
@@ -457,6 +476,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 2554,
             "end_tick": null
@@ -481,6 +501,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 2687,
             "end_tick": null
@@ -505,6 +526,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 2765,
             "end_tick": null
@@ -529,6 +551,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 2879,
             "end_tick": null
@@ -553,6 +576,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 2996,
             "end_tick": null
@@ -577,6 +601,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 3125,
             "end_tick": null
@@ -601,6 +626,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 3259,
             "end_tick": null
@@ -625,6 +651,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 3454,
             "end_tick": null
@@ -649,6 +676,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 3614,
             "end_tick": null
@@ -673,6 +701,7 @@
             "r": 0.18782078,
             "world_template": 0.0
           },
+          "instance_world_id": null,
           "time_window": {
             "start_tick": 3750,
             "end_tick": null
@@ -700,6 +729,7 @@
             "world_template": 1.0,
             "world_yaw": -1.683
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 4339,
             "end_tick": null
@@ -728,6 +758,7 @@
             "world_template": 1.0,
             "world_yaw": -1.5565
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 4542,
             "end_tick": null
@@ -756,6 +787,7 @@
             "world_template": 1.0,
             "world_yaw": 2.035
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 4591,
             "end_tick": null
@@ -784,6 +816,7 @@
             "world_template": 1.0,
             "world_yaw": -0.66
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 4624,
             "end_tick": null
@@ -812,6 +845,7 @@
             "world_template": 1.0,
             "world_yaw": 1.155
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 4658,
             "end_tick": null
@@ -840,6 +874,7 @@
             "world_template": 1.0,
             "world_yaw": 1.5455
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 5758,
             "end_tick": null
@@ -868,6 +903,7 @@
             "world_template": 1.0,
             "world_yaw": 2.475
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 5914,
             "end_tick": null
@@ -896,6 +932,7 @@
             "world_template": 1.0,
             "world_yaw": -1.749
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 6173,
             "end_tick": null
@@ -924,6 +961,7 @@
             "world_template": 1.0,
             "world_yaw": 0.935
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 6536,
             "end_tick": null
@@ -952,6 +990,7 @@
             "world_template": 1.0,
             "world_yaw": 0.5335
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 7043,
             "end_tick": null
@@ -978,6 +1017,7 @@
             "world_scale": 1.0,
             "world_template": 1.0
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 7730,
             "end_tick": null
@@ -1005,6 +1045,7 @@
             "world_template": 1.0,
             "world_yaw": -0.176
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 31704,
             "end_tick": null
@@ -1029,6 +1070,7 @@
             "r": 0.18782078,
             "world_template": 1.0
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 8955,
             "end_tick": null
@@ -1053,6 +1095,7 @@
             "r": 0.18782078,
             "world_template": 1.0
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 9331,
             "end_tick": null
@@ -1077,6 +1120,7 @@
             "r": 0.18782078,
             "world_template": 1.0
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 9630,
             "end_tick": null
@@ -1101,6 +1145,7 @@
             "r": 0.18782078,
             "world_template": 1.0
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 10096,
             "end_tick": null
@@ -1125,6 +1170,7 @@
             "r": 0.18782078,
             "world_template": 1.0
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 10700,
             "end_tick": null
@@ -1150,6 +1196,7 @@
             "world_scale": 1.0,
             "world_template": 1.0
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 362,
             "end_tick": null
@@ -1176,6 +1223,7 @@
             "world_scale": 1.0,
             "world_template": 1.0
           },
+          "instance_world_id": "legacy-template:1",
           "time_window": {
             "start_tick": 459,
             "end_tick": null

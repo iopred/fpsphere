@@ -537,11 +537,12 @@ Epic tracking:
 
 #### S6-C Multiplayer + AOI World-Entity Streams
 
-- [ ] `S6-C1` Replace focus-sphere context with explicit world-context id/path.
+- [x] `S6-C1` Add explicit `world_context` id/path alongside legacy `focus_sphere_id` in multiplayer hello/update messages, with server-side precedence for non-empty `instance_path`.
 - [ ] `S6-C2` Add AOI filtering for world-entity streams using world context + spatial partitioning.
 - [ ] `S6-C3` Ensure template/world editing isolation:
   - editors in nested world contexts do not receive unrelated outer-world entity updates.
 - [ ] `S6-C4` Add AOI world-entity metrics instrumentation and trend reporting (non-blocking for Sprint 6 signoff).
+- [ ] `S6-C5` Remove legacy `focus_sphere_id` from multiplayer protocol and runtime state after `world_context` rollout verification.
 
 #### S6-D Migration + Cleanup
 

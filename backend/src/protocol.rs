@@ -14,6 +14,8 @@ pub struct SphereEntity {
     pub radius: f32,
     pub position_3d: [f32; 3],
     pub dimensions: BTreeMap<String, f32>,
+    #[serde(default)]
+    pub instance_world_id: Option<String>,
     pub time_window: TimeWindow,
     pub tags: Vec<String>,
 }
@@ -208,7 +210,7 @@ impl WorldRepository {
             }
 
             world.world_id = world_id.clone();
-            compact_shared_template_legacy_descendants(&mut world);
+            normalize_world_snapshot_runtime(&mut world);
             if masters.insert(world_id.clone(), world).is_some() {
                 return Err(format!(
                     "persisted state contains duplicate world_id '{}'",
@@ -233,7 +235,7 @@ impl WorldRepository {
             }
 
             branch.world.world_id = world_id.clone();
-            compact_shared_template_legacy_descendants(&mut branch.world);
+            normalize_world_snapshot_runtime(&mut branch.world);
             user_worlds.insert((world_id, user_id), branch.world);
         }
 
@@ -272,7 +274,7 @@ impl WorldRepository {
     }
 
     pub fn reset_to_seed_world(&mut self, mut seed_world: WorldSnapshot) -> WorldSnapshot {
-        compact_shared_template_legacy_descendants(&mut seed_world);
+        normalize_world_snapshot_runtime(&mut seed_world);
 
         let world_id = seed_world.world_id.clone();
         self.masters.clear();
@@ -303,7 +305,7 @@ impl WorldRepository {
                 .get(&(world_id.to_string(), user_id_value.to_string()))
             {
                 let mut projected = snapshot.clone();
-                compact_shared_template_legacy_descendants(&mut projected);
+                normalize_world_snapshot_runtime(&mut projected);
                 return Some(filter_world_snapshot_by_time_window(
                     projected,
                     temporal_query.unwrap_or_default(),
@@ -313,7 +315,7 @@ impl WorldRepository {
 
         self.masters.get(world_id).cloned().map(|snapshot| {
             let mut snapshot = snapshot;
-            compact_shared_template_legacy_descendants(&mut snapshot);
+            normalize_world_snapshot_runtime(&mut snapshot);
             filter_world_snapshot_by_time_window(snapshot, temporal_query.unwrap_or_default())
         })
     }
@@ -374,7 +376,7 @@ impl WorldRepository {
         let mut next_world = template;
         next_world.world_id = world_id.clone();
         next_world.tick = 0;
-        compact_shared_template_legacy_descendants(&mut next_world);
+        normalize_world_snapshot_runtime(&mut next_world);
 
         self.masters.insert(world_id, next_world.clone());
         Ok(next_world)
@@ -424,7 +426,7 @@ impl WorldRepository {
             match apply_commit_operations(&mut candidate, &request.operations) {
                 Ok(()) => {
                     candidate.tick = candidate.tick.saturating_add(1);
-                    compact_shared_template_legacy_descendants(&mut candidate);
+                    normalize_world_snapshot_runtime(&mut candidate);
                     self.masters.insert(world_id.to_string(), candidate.clone());
                     self.commit_seq = self.commit_seq.saturating_add(1);
 
@@ -450,7 +452,7 @@ impl WorldRepository {
         match apply_commit_operations(&mut user_candidate, &request.operations) {
             Ok(()) => {
                 user_candidate.tick = user_candidate.tick.saturating_add(1);
-                compact_shared_template_legacy_descendants(&mut user_candidate);
+                normalize_world_snapshot_runtime(&mut user_candidate);
                 self.user_worlds
                     .insert(user_branch_key, user_candidate.clone());
                 self.commit_seq = self.commit_seq.saturating_add(1);
@@ -565,6 +567,7 @@ fn filter_world_snapshot_by_time_window(
 
 const WORLD_TEMPLATE_DIMENSION: &str = "world_template";
 const TEMPLATE_ROOT_TAG: &str = "template-root";
+const LEGACY_TEMPLATE_INSTANCE_WORLD_PREFIX: &str = "legacy-template:";
 
 fn read_template_id(entity: &SphereEntity) -> Option<i32> {
     let value = *entity.dimensions.get(WORLD_TEMPLATE_DIMENSION)?;
@@ -578,6 +581,32 @@ fn read_template_id(entity: &SphereEntity) -> Option<i32> {
     }
 
     Some(truncated as i32)
+}
+
+fn normalize_instance_world_reference(entity: &mut SphereEntity) {
+    if let Some(normalized) = entity
+        .instance_world_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        entity.instance_world_id = Some(normalized.to_string());
+        return;
+    }
+
+    entity.instance_world_id = read_template_id(entity)
+        .map(|template_id| format!("{}{}", LEGACY_TEMPLATE_INSTANCE_WORLD_PREFIX, template_id));
+}
+
+fn normalize_world_instance_world_references(world: &mut WorldSnapshot) {
+    for entity in &mut world.entities {
+        normalize_instance_world_reference(entity);
+    }
+}
+
+fn normalize_world_snapshot_runtime(world: &mut WorldSnapshot) {
+    compact_shared_template_legacy_descendants(world);
+    normalize_world_instance_world_references(world);
 }
 
 fn compact_shared_template_legacy_descendants(world: &mut WorldSnapshot) {
@@ -892,6 +921,7 @@ pub fn example_world_snapshot() -> WorldSnapshot {
                 radius: 60.0,
                 position_3d: [0.0, 0.0, 0.0],
                 dimensions: world_dimensions,
+                instance_world_id: None,
                 time_window: TimeWindow {
                     start_tick: 0,
                     end_tick: None,
@@ -904,6 +934,7 @@ pub fn example_world_snapshot() -> WorldSnapshot {
                 radius: 50.0,
                 position_3d: [0.0, -55.0, 0.0],
                 dimensions: ground_dimensions,
+                instance_world_id: None,
                 time_window: TimeWindow {
                     start_tick: 0,
                     end_tick: None,
@@ -916,6 +947,7 @@ pub fn example_world_snapshot() -> WorldSnapshot {
                 radius: 9.0,
                 position_3d: [-12.0, -2.0, -6.0],
                 dimensions: building_dimensions,
+                instance_world_id: None,
                 time_window: TimeWindow {
                     start_tick: 0,
                     end_tick: None,
@@ -928,6 +960,7 @@ pub fn example_world_snapshot() -> WorldSnapshot {
                 radius: 3.0,
                 position_3d: [3.0, -3.0, 8.0],
                 dimensions: resource_dimensions,
+                instance_world_id: None,
                 time_window: TimeWindow {
                     start_tick: 0,
                     end_tick: None,
@@ -940,6 +973,7 @@ pub fn example_world_snapshot() -> WorldSnapshot {
                 radius: 12.0,
                 position_3d: [18.0, -2.0, 14.0],
                 dimensions: world_instance_dimensions,
+                instance_world_id: None,
                 time_window: TimeWindow {
                     start_tick: 0,
                     end_tick: None,
@@ -965,12 +999,20 @@ mod tests {
             radius: 2.0,
             position_3d: [1.0, 2.0, 3.0],
             dimensions: BTreeMap::new(),
+            instance_world_id: None,
             time_window: TimeWindow {
                 start_tick: 0,
                 end_tick: None,
             },
             tags: vec!["test".to_string()],
         }
+    }
+
+    fn make_world_instance_sphere(id: &str, instance_world_id: &str) -> SphereEntity {
+        let mut sphere = make_test_sphere(id);
+        sphere.instance_world_id = Some(instance_world_id.to_string());
+        sphere.tags = vec!["world-instance".to_string()];
+        sphere
     }
 
     fn make_child_sphere(
@@ -985,6 +1027,7 @@ mod tests {
             radius,
             position_3d,
             dimensions: BTreeMap::new(),
+            instance_world_id: None,
             time_window: TimeWindow {
                 start_tick: 0,
                 end_tick: None,
@@ -1005,6 +1048,7 @@ mod tests {
             radius: 12.0,
             position_3d: [0.0, 0.0, 0.0],
             dimensions,
+            instance_world_id: None,
             time_window: TimeWindow {
                 start_tick: 0,
                 end_tick: None,
@@ -1026,6 +1070,7 @@ mod tests {
             radius: 1.2,
             position_3d: [0.0, -1.0, 0.0],
             dimensions,
+            instance_world_id: None,
             time_window: TimeWindow {
                 start_tick: 0,
                 end_tick: None,
@@ -1046,6 +1091,7 @@ mod tests {
             radius: 4.0,
             position_3d: [1.5, -1.2, 2.2],
             dimensions,
+            instance_world_id: None,
             time_window: TimeWindow {
                 start_tick: 0,
                 end_tick: None,
@@ -1066,6 +1112,7 @@ mod tests {
             radius: 2.0,
             position_3d: [0.0, 0.0, 0.0],
             dimensions: BTreeMap::new(),
+            instance_world_id: None,
             time_window: TimeWindow {
                 start_tick,
                 end_tick,
@@ -1868,6 +1915,86 @@ mod tests {
 
         assert_eq!(scaled_child.radius, 4.0);
         assert_eq!(scaled_child.position_3d, [24.0, -4.0, 24.0]);
+    }
+
+    #[test]
+    fn create_commit_preserves_instance_world_id() {
+        let mut repository = WorldRepository::new(example_world_snapshot());
+        let response = repository
+            .commit(
+                "world-main",
+                CommitRequest {
+                    user_id: "alice".to_string(),
+                    base_tick: 0,
+                    operations: vec![CommitOperation::Create {
+                        sphere: make_world_instance_sphere(
+                            "sphere-world-instance-ref-001",
+                            "world-main",
+                        ),
+                    }],
+                },
+            )
+            .expect("instance create should succeed");
+
+        let created = response
+            .world
+            .entities
+            .iter()
+            .find(|item| item.id == "sphere-world-instance-ref-001")
+            .expect("instance sphere should be present");
+        assert_eq!(created.instance_world_id.as_deref(), Some("world-main"));
+    }
+
+    #[test]
+    fn get_world_snapshot_derives_instance_world_id_from_legacy_template_dimension() {
+        let repository = WorldRepository::new(example_world_snapshot());
+        let snapshot = repository
+            .get_world_snapshot("world-main", None)
+            .expect("world snapshot");
+
+        let world_instance = snapshot
+            .entities
+            .iter()
+            .find(|entity| entity.id == "sphere-world-instance-001")
+            .expect("example world instance sphere");
+        assert_eq!(
+            world_instance.instance_world_id.as_deref(),
+            Some("legacy-template:1")
+        );
+    }
+
+    #[test]
+    fn explicit_instance_world_id_is_preserved_when_world_template_dimension_exists() {
+        let mut repository = WorldRepository::new(example_world_snapshot());
+        let mut world_instance = make_test_sphere("sphere-world-instance-explicit-001");
+        world_instance
+            .dimensions
+            .insert("world_template".to_string(), 2.0);
+        world_instance.instance_world_id = Some(" world-custom-002 ".to_string());
+
+        let response = repository
+            .commit(
+                "world-main",
+                CommitRequest {
+                    user_id: "alice".to_string(),
+                    base_tick: 0,
+                    operations: vec![CommitOperation::Create {
+                        sphere: world_instance,
+                    }],
+                },
+            )
+            .expect("instance create should succeed");
+
+        let created = response
+            .world
+            .entities
+            .iter()
+            .find(|item| item.id == "sphere-world-instance-explicit-001")
+            .expect("explicit world instance sphere should be present");
+        assert_eq!(
+            created.instance_world_id.as_deref(),
+            Some("world-custom-002")
+        );
     }
 
     #[test]

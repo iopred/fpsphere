@@ -29,6 +29,7 @@ import {
   MultiplayerClient,
   type MultiplayerSnapshot,
   type MultiplayerServerResetNotice,
+  type MultiplayerWorldContext,
   type MultiplayerWorldCommit,
 } from "./multiplayerClient";
 import { LocalWorldStore, type WorldStoreSnapshot } from "./worldStore";
@@ -54,6 +55,7 @@ import { GameplayHudPanel } from "./gameplayHudPanel";
 import { EditorInteractionController } from "./editorInteractionController";
 import { EditorKeyboardController } from "./editorKeyboardController";
 import { EditorActionsController } from "./editorActionsController";
+import { resolveTemplateIdForLegacyCompatibility } from "./worldInstanceRefs";
 
 const FIXED_STEP_SECONDS = 1 / 60;
 const MOVE_SPEED = 18;
@@ -792,16 +794,10 @@ export class GameApp {
   }
 
   private readTemplateId(entity: SphereEntity | null): number {
-    if (!entity) {
-      return TEMPLATE_NONE_ID;
-    }
-
-    const value = entity.dimensions[SUBWORLD_TEMPLATE_DIMENSION];
-    if (!Number.isFinite(value)) {
-      return TEMPLATE_NONE_ID;
-    }
-
-    return Math.max(TEMPLATE_NONE_ID, Math.trunc(value));
+    return Math.max(
+      TEMPLATE_NONE_ID,
+      resolveTemplateIdForLegacyCompatibility(entity) ?? TEMPLATE_NONE_ID,
+    );
   }
 
   private isTemplateRootSphere(entity: SphereEntity): boolean {
@@ -811,6 +807,18 @@ export class GameApp {
   private getMultiplayerTemplateFocusSphereId(): string | null {
     const activeParent = this.worldStore.getParentSphere();
     return this.isTemplateRootSphere(activeParent) ? activeParent.id : null;
+  }
+
+  private getMultiplayerWorldContext(): MultiplayerWorldContext | null {
+    const focusSphereId = this.getMultiplayerTemplateFocusSphereId();
+    if (!focusSphereId) {
+      return null;
+    }
+
+    return {
+      root_world_id: this.currentWorldId,
+      instance_path: [focusSphereId],
+    };
   }
 
   private getTemplateRootSphere(templateId: number): SphereEntity | null {
@@ -1345,6 +1353,7 @@ export class GameApp {
       worldId,
       avatarId: this.selectedAvatarId,
       focusSphereId: this.getMultiplayerTemplateFocusSphereId(),
+      worldContext: this.getMultiplayerWorldContext(),
       callbacks: {
         onStatus: (status) => {
           this.multiplayerStatus = status;
@@ -1707,6 +1716,7 @@ export class GameApp {
       inputSequence,
       this.selectedAvatarId,
       this.getMultiplayerTemplateFocusSphereId(),
+      this.getMultiplayerWorldContext(),
     );
     this.lastNetworkSendTick = this.tick;
   }

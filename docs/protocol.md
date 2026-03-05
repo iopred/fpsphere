@@ -34,6 +34,7 @@
       "radius": 60.0,
       "position_3d": [0.0, 0.0, 0.0],
       "dimensions": { "money": 0.0 },
+      "instance_world_id": null,
       "time_window": { "start_tick": 0, "end_tick": null },
       "tags": ["world"]
     }
@@ -97,6 +98,7 @@
         "radius": 2.4,
         "position_3d": [2.0, 1.0, -4.0],
         "dimensions": { "money": 0.5 },
+        "instance_world_id": "world-main",
         "time_window": { "start_tick": 7, "end_tick": null },
         "tags": ["user-created"]
       }
@@ -137,6 +139,12 @@
   - `world_scale` (optional numeric scale multiplier)
 - The backend stores these dimensions as normal sphere data.
 - The frontend expands template children client-side from these dimensions, so the server does not need to duplicate subworld child entities.
+- Transitional model note:
+  - `instance_world_id` is available on sphere entities as an explicit nested-world reference field.
+  - When `instance_world_id` is missing and legacy `world_template` is present, backend snapshot/commit payloads derive:
+    - `instance_world_id = "legacy-template:<template_id>"`.
+  - Explicit `instance_world_id` values take precedence over legacy dimension fallback.
+  - Legacy dimension-driven instancing remains supported during migration.
 
 ## WebSocket multiplayer messages
 
@@ -148,7 +156,11 @@ Client -> server:
   "user_id": "user-123",
   "world_id": "world-main",
   "avatar_id": "human",
-  "focus_sphere_id": "sphere-template-root-1"
+  "focus_sphere_id": "sphere-template-root-1",
+  "world_context": {
+    "root_world_id": "world-main",
+    "instance_path": ["sphere-template-root-1"]
+  }
 }
 ```
   - `avatar_id` is optional; supported values are `duck` and `human`.
@@ -163,12 +175,19 @@ Client -> server:
   "pitch": -0.1,
   "client_tick": 42,
   "avatar_id": "duck",
-  "focus_sphere_id": null
+  "focus_sphere_id": null,
+  "world_context": null
 }
 ```
   - `client_tick` is the client's monotonically increasing input sequence.
   - `avatar_id` is optional; supported values are `duck` and `human`.
   - `focus_sphere_id` is optional; use `null` to clear focus when leaving template edit context.
+  - `world_context` is optional and structured as:
+    - `root_world_id`: root world id for the active editing context.
+    - `instance_path`: ordered instance ids from root to current nested context.
+  - Migration behavior:
+    - when `world_context` is provided and has a non-empty `instance_path`, server focus partitioning uses it.
+    - when missing/empty, server falls back to legacy `focus_sphere_id` behavior.
 
 Server -> client:
 - `welcome`:

@@ -1,6 +1,7 @@
 import type { SphereEntity } from "@fpsphere/shared-types";
 import { parseSphereEntities } from "@fpsphere/shared-types";
 import type { SeedWorld } from "./worldSeed";
+import { normalizeInstanceWorldIdForRuntime } from "./worldInstanceRefs";
 
 export interface BackendTimeWindow {
   start_tick: number;
@@ -13,6 +14,7 @@ export interface BackendSphereEntity {
   radius: number;
   position_3d: [number, number, number];
   dimensions: Record<string, number>;
+  instance_world_id?: string | null;
   time_window: BackendTimeWindow;
   tags: string[];
 }
@@ -150,6 +152,7 @@ function toBackendSphereEntity(entity: SphereEntity): BackendSphereEntity {
     radius: entity.radius,
     position_3d: entity.position3d,
     dimensions: entity.dimensions,
+    instance_world_id: entity.instanceWorldId ?? null,
     time_window: {
       start_tick: entity.timeWindow.start,
       end_tick: entity.timeWindow.end,
@@ -165,6 +168,10 @@ function transformBackendEntity(entity: BackendSphereEntity): unknown {
     radius: entity.radius,
     position3d: entity.position_3d,
     dimensions: entity.dimensions ?? {},
+    instanceWorldId: normalizeInstanceWorldIdForRuntime({
+      instanceWorldId: entity.instance_world_id ?? null,
+      dimensions: entity.dimensions ?? {},
+    }),
     timeWindow: {
       start: entity.time_window?.start_tick ?? 0,
       end: entity.time_window?.end_tick ?? null,

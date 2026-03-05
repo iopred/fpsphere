@@ -1,4 +1,5 @@
 import type { SphereEntity, Vector3Tuple } from "@fpsphere/shared-types";
+import { resolveTemplateIdForLegacyCompatibility } from "./worldInstanceRefs";
 
 export const SUBWORLD_TEMPLATE_DIMENSION = "world_template";
 export const SUBWORLD_SCALE_DIMENSION = "world_scale";
@@ -87,17 +88,7 @@ export function getTemplateRootRadius(templateId: number): number {
 }
 
 function resolveTemplateId(entity: SphereEntity): number | null {
-  const value = entity.dimensions[SUBWORLD_TEMPLATE_DIMENSION];
-  if (!Number.isFinite(value)) {
-    return null;
-  }
-
-  const templateId = Math.trunc(value);
-  if (templateId <= 0) {
-    return null;
-  }
-
-  return templateId;
+  return resolveTemplateIdForLegacyCompatibility(entity);
 }
 
 function resolveScale(entity: SphereEntity, template: SubworldTemplate): number | null {

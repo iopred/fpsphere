@@ -61,6 +61,46 @@ describe("worldApi", () => {
     expect(loaded.world.children).toHaveLength(1);
     expect(loaded.world.children[0].id).toBe("sphere-building-001");
     expect(loaded.world.children[0].position3d).toEqual([1, 2, 3]);
+    expect(loaded.world.children[0].instanceWorldId).toBeNull();
+  });
+
+  it("derives runtime instanceWorldId from legacy world_template when explicit reference is absent", async () => {
+    const payload = backendSnapshotPayload();
+    payload.entities[1].dimensions = {
+      money: 0.2,
+      world_template: 1,
+      world_scale: 0.75,
+    };
+
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof globalThis.fetch;
+
+    const loaded = await fetchWorldSeed("world-main", "user-1");
+    expect(loaded.world.children[0].instanceWorldId).toBe("legacy-template:1");
+  });
+
+  it("prefers explicit instance_world_id over legacy world_template fallback", async () => {
+    const payload = backendSnapshotPayload();
+    payload.entities[1].dimensions = {
+      money: 0.2,
+      world_template: 1,
+      world_scale: 0.75,
+    };
+    payload.entities[1].instance_world_id = "world-human-city";
+
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof globalThis.fetch;
+
+    const loaded = await fetchWorldSeed("world-main", "user-1");
+    expect(loaded.world.children[0].instanceWorldId).toBe("world-human-city");
   });
 
   it("sends temporal query params for world snapshot fetch", async () => {

@@ -23,6 +23,7 @@ export interface SphereEntity {
   radius: number;
   position3d: Vector3Tuple;
   dimensions: DimensionMap;
+  instanceWorldId?: string | null;
   timeWindow: TimeWindow;
   tags: string[];
 }
@@ -74,6 +75,18 @@ function readNullableString(
 
   issues.push({ path, message: "Expected string or null" });
   return null;
+}
+
+function readOptionalNullableString(
+  value: unknown,
+  issues: ParseIssue[],
+  path: string,
+): string | null {
+  if (value === undefined) {
+    return null;
+  }
+
+  return readNullableString(value, issues, path);
 }
 
 function readFiniteNumber(
@@ -199,6 +212,11 @@ export function parseSphereEntity(value: unknown): SphereEntity {
   const radius = readFiniteNumber(value.radius, issues, "radius");
   const position3d = readVector3(value.position3d, issues, "position3d");
   const dimensions = readDimensions(value.dimensions, issues, "dimensions");
+  const instanceWorldId = readOptionalNullableString(
+    value.instanceWorldId,
+    issues,
+    "instanceWorldId",
+  );
   const timeWindow = readTimeWindow(value.timeWindow, issues, "timeWindow");
   const tags = readTags(value.tags, issues, "tags");
 
@@ -212,6 +230,7 @@ export function parseSphereEntity(value: unknown): SphereEntity {
     radius,
     position3d,
     dimensions,
+    instanceWorldId,
     timeWindow,
     tags,
   };

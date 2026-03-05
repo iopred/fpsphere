@@ -11,6 +11,7 @@ use tokio::time::{interval, Duration, MissedTickBehavior};
 
 const SNAPSHOT_TICK_INTERVAL: Duration = Duration::from_micros(16_666);
 const DEFAULT_AVATAR_ID: &str = "duck";
+const WORLD_CONTEXT_KEY_SEPARATOR: &str = "\u{1f}";
 
 fn normalize_avatar_id_option(raw_avatar_id: Option<&str>) -> Option<String> {
     let normalized = raw_avatar_id?.trim();
@@ -34,6 +35,62 @@ fn normalize_focus_sphere_id_option(raw_focus_sphere_id: Option<&str>) -> Option
     Some(normalized.to_string())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MultiplayerWorldContext {
+    pub root_world_id: String,
+    #[serde(default)]
+    pub instance_path: Vec<String>,
+}
+
+fn normalize_world_context(
+    world_id: &str,
+    raw_world_context: Option<MultiplayerWorldContext>,
+    raw_focus_sphere_id: Option<&str>,
+) -> Option<MultiplayerWorldContext> {
+    if let Some(raw_context) = raw_world_context {
+        let root_world_id = raw_context.root_world_id.trim();
+        let normalized_root_world_id = if root_world_id.is_empty() {
+            world_id.to_string()
+        } else {
+            root_world_id.to_string()
+        };
+        let instance_path = raw_context
+            .instance_path
+            .into_iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>();
+        if !instance_path.is_empty() {
+            return Some(MultiplayerWorldContext {
+                root_world_id: normalized_root_world_id,
+                instance_path,
+            });
+        }
+    }
+
+    let focus_sphere_id = normalize_focus_sphere_id_option(raw_focus_sphere_id)?;
+    Some(MultiplayerWorldContext {
+        root_world_id: world_id.to_string(),
+        instance_path: vec![focus_sphere_id],
+    })
+}
+
+fn world_context_key(world_context: Option<&MultiplayerWorldContext>) -> Option<String> {
+    let context = world_context?;
+    if context.instance_path.is_empty() {
+        return None;
+    }
+
+    let mut value = String::new();
+    value.push_str(context.root_world_id.as_str());
+    for segment in &context.instance_path {
+        value.push_str(WORLD_CONTEXT_KEY_SEPARATOR);
+        value.push_str(segment.as_str());
+    }
+
+    Some(value)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerInputEnqueueResult {
     Queued,
@@ -49,6 +106,7 @@ struct PlayerInputCommand {
     pitch: f32,
     avatar_id: Option<String>,
     focus_sphere_id: Option<String>,
+    world_context: Option<MultiplayerWorldContext>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,6 +119,7 @@ pub struct MultiplayerPlayerState {
     pub pitch: f32,
     pub avatar_id: String,
     pub focus_sphere_id: Option<String>,
+    pub world_context: Option<MultiplayerWorldContext>,
     pub visible_to_others: bool,
 }
 
@@ -225,6 +284,8 @@ pub enum ClientMultiplayerMessage {
         avatar_id: Option<String>,
         #[serde(default)]
         focus_sphere_id: Option<String>,
+        #[serde(default)]
+        world_context: Option<MultiplayerWorldContext>,
     },
     PlayerUpdate {
         position_3d: [f32; 3],
@@ -235,6 +296,8 @@ pub enum ClientMultiplayerMessage {
         avatar_id: Option<String>,
         #[serde(default)]
         focus_sphere_id: Option<String>,
+        #[serde(default)]
+        world_context: Option<MultiplayerWorldContext>,
     },
     Ping,
 }
@@ -313,9 +376,22 @@ impl AuthoritativePlayerStore {
         }
     }
 
-    fn set_player_focus(&mut self, player_id: &str, focus_sphere_id: Option<String>) {
+    fn set_player_context(
+        &mut self,
+        player_id: &str,
+        focus_sphere_id: Option<String>,
+        world_context: Option<MultiplayerWorldContext>,
+    ) {
         if let Some(player) = self.get_player_mut(player_id) {
-            player.focus_sphere_id = normalize_focus_sphere_id_option(focus_sphere_id.as_deref());
+            let normalized_focus_sphere_id =
+                normalize_focus_sphere_id_option(focus_sphere_id.as_deref());
+            let normalized_world_context = normalize_world_context(
+                player.world_id.as_str(),
+                world_context,
+                normalized_focus_sphere_id.as_deref(),
+            );
+            player.focus_sphere_id = normalized_focus_sphere_id;
+            player.world_context = normalized_world_context;
         }
     }
 
@@ -328,10 +404,11 @@ impl AuthoritativePlayerStore {
         pitch: f32,
         avatar_id: Option<String>,
         focus_sphere_id: Option<String>,
+        world_context: Option<MultiplayerWorldContext>,
     ) -> PlayerInputEnqueueResult {
-        if !self.world_by_player_id.contains_key(player_id) {
+        let Some(world_id) = self.world_by_player_id.get(player_id).cloned() else {
             return PlayerInputEnqueueResult::PlayerMissing;
-        }
+        };
 
         if self
             .last_processed_input_seq_by_player
@@ -349,6 +426,14 @@ impl AuthoritativePlayerStore {
             return PlayerInputEnqueueResult::DroppedStaleOrDuplicate;
         }
 
+        let normalized_focus_sphere_id =
+            normalize_focus_sphere_id_option(focus_sphere_id.as_deref());
+        let normalized_world_context = normalize_world_context(
+            world_id.as_str(),
+            world_context,
+            normalized_focus_sphere_id.as_deref(),
+        );
+
         pending.insert(
             client_tick,
             PlayerInputCommand {
@@ -357,7 +442,8 @@ impl AuthoritativePlayerStore {
                 yaw,
                 pitch,
                 avatar_id: normalize_avatar_id_option(avatar_id.as_deref()),
-                focus_sphere_id: normalize_focus_sphere_id_option(focus_sphere_id.as_deref()),
+                focus_sphere_id: normalized_focus_sphere_id,
+                world_context: normalized_world_context,
             },
         );
         PlayerInputEnqueueResult::Queued
@@ -400,6 +486,7 @@ impl AuthoritativePlayerStore {
                         player.avatar_id = avatar_id;
                     }
                     player.focus_sphere_id = command.focus_sphere_id;
+                    player.world_context = command.world_context;
                     next_processed = Some(command.client_tick);
                 }
             }
@@ -490,6 +577,12 @@ impl AuthoritativePlayerStore {
         let world_id = self.world_by_player_id.get(player_id)?;
         let player = self.by_world.get(world_id)?.get(player_id)?;
         player.focus_sphere_id.clone()
+    }
+
+    fn player_focus_context_key(&self, player_id: &str) -> Option<String> {
+        let world_id = self.world_by_player_id.get(player_id)?;
+        let player = self.by_world.get(world_id)?.get(player_id)?;
+        world_context_key(player.world_context.as_ref()).or_else(|| player.focus_sphere_id.clone())
     }
 
     fn player_visible_to_others(&self, player_id: &str) -> bool {
@@ -604,6 +697,7 @@ impl MultiplayerHub {
             pitch: 0.0,
             avatar_id: DEFAULT_AVATAR_ID.to_string(),
             focus_sphere_id: None,
+            world_context: None,
             visible_to_others,
         };
 
@@ -638,10 +732,20 @@ impl MultiplayerHub {
     }
 
     pub async fn set_player_focus(&self, player_id: &str, focus_sphere_id: Option<String>) {
+        self.set_player_context(player_id, focus_sphere_id, None)
+            .await;
+    }
+
+    pub async fn set_player_context(
+        &self,
+        player_id: &str,
+        focus_sphere_id: Option<String>,
+        world_context: Option<MultiplayerWorldContext>,
+    ) {
         self.players
             .write()
             .await
-            .set_player_focus(player_id, focus_sphere_id);
+            .set_player_context(player_id, focus_sphere_id, world_context);
     }
 
     #[cfg(test)]
@@ -676,6 +780,30 @@ impl MultiplayerHub {
         avatar_id: Option<String>,
         focus_sphere_id: Option<String>,
     ) -> PlayerInputEnqueueResult {
+        self.update_player_with_focus_context(
+            player_id,
+            position_3d,
+            yaw,
+            pitch,
+            client_tick,
+            avatar_id,
+            focus_sphere_id,
+            None,
+        )
+        .await
+    }
+
+    pub async fn update_player_with_focus_context(
+        &self,
+        player_id: &str,
+        position_3d: [f32; 3],
+        yaw: f32,
+        pitch: f32,
+        client_tick: u64,
+        avatar_id: Option<String>,
+        focus_sphere_id: Option<String>,
+        world_context: Option<MultiplayerWorldContext>,
+    ) -> PlayerInputEnqueueResult {
         self.players.write().await.update_player_pose(
             player_id,
             client_tick,
@@ -684,6 +812,7 @@ impl MultiplayerHub {
             pitch,
             avatar_id,
             focus_sphere_id,
+            world_context,
         )
     }
 
@@ -702,14 +831,14 @@ impl MultiplayerHub {
         for player in players {
             focus_context_by_player_id.insert(
                 player.player_id.clone(),
-                store.player_focus_sphere_id(player.player_id.as_str()),
+                store.player_focus_context_key(player.player_id.as_str()),
             );
         }
 
         if !focus_context_by_player_id.contains_key(observer_player_id) {
             focus_context_by_player_id.insert(
                 observer_player_id.to_string(),
-                store.player_focus_sphere_id(observer_player_id),
+                store.player_focus_context_key(observer_player_id),
             );
         }
 
@@ -786,8 +915,9 @@ impl MultiplayerHub {
 mod tests {
     use super::{
         build_snapshot_delta, filter_snapshot_players_for_focus_context,
-        filter_snapshot_players_for_observer, snapshot_players_by_id, MultiplayerHub,
-        MultiplayerPlayerSnapshot, PlayerInputEnqueueResult, ServerMultiplayerMessage,
+        filter_snapshot_players_for_observer, normalize_world_context, snapshot_players_by_id,
+        MultiplayerHub, MultiplayerPlayerSnapshot, MultiplayerWorldContext,
+        PlayerInputEnqueueResult, ServerMultiplayerMessage,
     };
     use crate::aoi::AoiPolicy;
     use crate::protocol::{example_world_snapshot, CommitTarget};
@@ -1530,6 +1660,44 @@ mod tests {
             &focus_context_by_player_id,
         );
         assert_eq!(missing_observer.len(), players.len());
+    }
+
+    #[test]
+    fn normalize_world_context_prefers_non_empty_instance_path() {
+        let context = normalize_world_context(
+            "world-main",
+            Some(MultiplayerWorldContext {
+                root_world_id: "world-main".to_string(),
+                instance_path: vec!["sphere-template-root-1".to_string()],
+            }),
+            Some("sphere-template-root-2"),
+        )
+        .expect("normalized world context");
+
+        assert_eq!(context.root_world_id, "world-main");
+        assert_eq!(
+            context.instance_path,
+            vec!["sphere-template-root-1".to_string()]
+        );
+    }
+
+    #[test]
+    fn normalize_world_context_falls_back_to_focus_when_instance_path_is_empty() {
+        let context = normalize_world_context(
+            "world-main",
+            Some(MultiplayerWorldContext {
+                root_world_id: "world-main".to_string(),
+                instance_path: Vec::new(),
+            }),
+            Some("sphere-template-root-1"),
+        )
+        .expect("fallback world context");
+
+        assert_eq!(context.root_world_id, "world-main");
+        assert_eq!(
+            context.instance_path,
+            vec!["sphere-template-root-1".to_string()]
+        );
     }
 
     #[tokio::test]

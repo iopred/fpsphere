@@ -13,8 +13,8 @@ use axum::{Json, Router};
 use datastore::FileWorldDatastore;
 use multiplayer::{
     build_snapshot_delta, filter_snapshot_players_for_observer, snapshot_players_by_id,
-    ClientMultiplayerMessage, MultiplayerHub, MultiplayerPlayerSnapshot, PlayerInputEnqueueResult,
-    ServerMultiplayerMessage,
+    ClientMultiplayerMessage, MultiplayerHub, MultiplayerPlayerSnapshot, MultiplayerWorldContext,
+    PlayerInputEnqueueResult, ServerMultiplayerMessage,
 };
 use protocol::{
     example_world_snapshot, CommitFailure, CommitOperation, CommitRequest, CommitResponse,
@@ -106,6 +106,7 @@ struct SessionSnapshotBaseline {
 struct SessionMessageUpdate {
     updated_user_id: Option<String>,
     updated_focus_sphere_id: Option<String>,
+    updated_world_context: Option<MultiplayerWorldContext>,
 }
 
 fn visible_to_others_from_mode(raw_mode: Option<&str>) -> bool {
@@ -577,6 +578,7 @@ async fn handle_ws_connection(
                                             session_user_id = updated_user_id;
                                         }
                                         session_focus_sphere_id = update.updated_focus_sphere_id;
+                                        let _ = update.updated_world_context;
                                     }
                                     Ok(None) => {}
                                     Err(()) => break,
@@ -754,6 +756,7 @@ async fn handle_client_message(
             world_id: requested_world_id,
             avatar_id,
             focus_sphere_id,
+            world_context,
         } => {
             if let Some(requested_world) = requested_world_id {
                 if requested_world != world_id {
@@ -782,11 +785,12 @@ async fn handle_client_message(
                 .await;
             state
                 .multiplayer
-                .set_player_focus(player_id, focus_sphere_id.clone())
+                .set_player_context(player_id, focus_sphere_id.clone(), world_context.clone())
                 .await;
             return Ok(Some(SessionMessageUpdate {
                 updated_user_id: normalized_user_id,
                 updated_focus_sphere_id: focus_sphere_id,
+                updated_world_context: world_context,
             }));
         }
         ClientMultiplayerMessage::PlayerUpdate {
@@ -796,10 +800,11 @@ async fn handle_client_message(
             client_tick,
             avatar_id,
             focus_sphere_id,
+            world_context,
         } => {
             let update_result = state
                 .multiplayer
-                .update_player_with_focus(
+                .update_player_with_focus_context(
                     player_id,
                     position_3d,
                     yaw,
@@ -807,6 +812,7 @@ async fn handle_client_message(
                     client_tick,
                     avatar_id,
                     focus_sphere_id.clone(),
+                    world_context.clone(),
                 )
                 .await;
 
@@ -819,6 +825,7 @@ async fn handle_client_message(
             return Ok(Some(SessionMessageUpdate {
                 updated_user_id: None,
                 updated_focus_sphere_id: focus_sphere_id,
+                updated_world_context: world_context,
             }));
         }
         ClientMultiplayerMessage::Ping => {

@@ -6,6 +6,7 @@ import {
   MultiplayerClient,
   type MultiplayerServerResetNotice,
   type MultiplayerSnapshot,
+  type MultiplayerWorldContext,
   type MultiplayerWorldCommit,
   type RemotePlayerState,
 } from "../game/multiplayerClient";
@@ -20,6 +21,7 @@ import {
   planRemoteAvatarWorldSwitch,
 } from "../game/remoteAvatarLifecycle";
 import { LocalWorldStore, type WorldStoreSnapshot } from "../game/worldStore";
+import { resolveTemplateIdForLegacyCompatibility } from "../game/worldInstanceRefs";
 import {
   getTemplateRootSphereId,
   instantiateSubworldChildren,
@@ -786,6 +788,7 @@ export class FpsphereArApp {
       userId: this.userId,
       worldId,
       visibilityMode: "hidden",
+      worldContext: this.buildMultiplayerWorldContext(worldId),
       callbacks: {
         onStatus: (status) => {
           if (status === "disconnected") {
@@ -810,6 +813,13 @@ export class FpsphereArApp {
         },
       },
     });
+  }
+
+  private buildMultiplayerWorldContext(worldId: string): MultiplayerWorldContext {
+    return {
+      root_world_id: worldId,
+      instance_path: [],
+    };
   }
 
   private async handleMultiplayerServerReset(
@@ -956,16 +966,10 @@ export class FpsphereArApp {
   }
 
   private readTemplateId(entity: SphereEntity | null): number {
-    if (!entity) {
-      return TEMPLATE_NONE_ID;
-    }
-
-    const value = entity.dimensions[SUBWORLD_TEMPLATE_DIMENSION];
-    if (!Number.isFinite(value)) {
-      return TEMPLATE_NONE_ID;
-    }
-
-    return Math.max(TEMPLATE_NONE_ID, Math.trunc(value));
+    return Math.max(
+      TEMPLATE_NONE_ID,
+      resolveTemplateIdForLegacyCompatibility(entity) ?? TEMPLATE_NONE_ID,
+    );
   }
 
   private isTemplateRootSphere(entity: SphereEntity): boolean {
