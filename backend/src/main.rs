@@ -1,4 +1,5 @@
 mod aoi;
+mod datastore;
 mod multiplayer;
 mod protocol;
 
@@ -9,6 +10,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use datastore::FileWorldDatastore;
 use multiplayer::{
     build_snapshot_delta, filter_snapshot_players_for_observer, snapshot_players_by_id,
     ClientMultiplayerMessage, MultiplayerHub, MultiplayerPlayerSnapshot, PlayerInputEnqueueResult,
@@ -22,14 +24,18 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::io::{self, AsyncBufReadExt, BufReader};
 use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::RwLock;
+use tokio::sync::{watch, RwLock};
 
 const SNAPSHOT_DELTA_REBASE_INTERVAL: u32 = 90;
+const DEFAULT_DATASTORE_PATH: &str = "data/world-repository.json";
 
 #[derive(Clone)]
 struct AppState {
     repository: Arc<RwLock<WorldRepository>>,
+    seed_world: WorldSnapshot,
+    datastore: Arc<FileWorldDatastore>,
     multiplayer: MultiplayerHub,
 }
 
@@ -128,13 +134,22 @@ async fn main() {
         )
         .init();
 
-    let repository = WorldRepository::new(example_world_snapshot());
+    let seed_world = example_world_snapshot();
+    let datastore_path = std::env::var("WORLD_DATASTORE_PATH")
+        .unwrap_or_else(|_| DEFAULT_DATASTORE_PATH.to_string());
+    let datastore = Arc::new(FileWorldDatastore::new(datastore_path));
+    let repository = load_repository(datastore.as_ref(), seed_world.clone()).await;
     let multiplayer = MultiplayerHub::new();
 
     let app_state = AppState {
         repository: Arc::new(RwLock::new(repository)),
+        seed_world,
+        datastore: datastore.clone(),
         multiplayer,
     };
+    if let Err(error) = persist_repository_snapshot(&app_state).await {
+        tracing::error!("failed to persist initial datastore snapshot: {}", error);
+    }
 
     let app = Router::new()
         .route("/healthz", get(health))
@@ -146,7 +161,7 @@ async fn main() {
         )
         .route("/api/v1/world/{world_id}/commit", post(commit_world))
         .route("/ws", get(ws_handler))
-        .with_state(app_state);
+        .with_state(app_state.clone());
 
     let bind_address = std::env::var("BIND_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:4000".to_string())
@@ -157,10 +172,142 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(bind_address)
         .await
         .expect("bind backend listener");
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let admin_console = tokio::spawn(run_admin_console(app_state.clone(), shutdown_tx.clone()));
 
     axum::serve(listener, app)
+        .with_graceful_shutdown(wait_for_shutdown_signal(shutdown_rx))
         .await
         .expect("start backend server");
+
+    let _ = shutdown_tx.send(true);
+    admin_console.abort();
+}
+
+async fn load_repository(
+    datastore: &FileWorldDatastore,
+    seed_world: WorldSnapshot,
+) -> WorldRepository {
+    match datastore.load().await {
+        Ok(Some(state)) => match WorldRepository::from_persisted_state(state) {
+            Ok(repository) => {
+                tracing::info!("loaded world datastore from {}", datastore.path().display());
+                repository
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "invalid persisted datastore state ({}); using seed snapshot",
+                    error
+                );
+                WorldRepository::new(seed_world)
+            }
+        },
+        Ok(None) => {
+            tracing::info!(
+                "no datastore file found at {}; using seed snapshot",
+                datastore.path().display()
+            );
+            WorldRepository::new(seed_world)
+        }
+        Err(error) => {
+            tracing::warn!(
+                "failed to read datastore at {} ({}); using seed snapshot",
+                datastore.path().display(),
+                error
+            );
+            WorldRepository::new(seed_world)
+        }
+    }
+}
+
+async fn persist_repository_snapshot(state: &AppState) -> Result<(), String> {
+    let persisted = {
+        let repository = state.repository.read().await;
+        repository.to_persisted_state()
+    };
+
+    state
+        .datastore
+        .save(&persisted)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+async fn reset_server_data(state: &AppState, reason: &str) {
+    let world = {
+        let mut repository = state.repository.write().await;
+        repository.reset_to_seed_world(state.seed_world.clone())
+    };
+    if let Err(error) = persist_repository_snapshot(state).await {
+        tracing::error!("failed to persist reset datastore snapshot: {}", error);
+    }
+
+    state
+        .multiplayer
+        .broadcast_server_reset(reason.to_string(), world.world_id.clone());
+    state.multiplayer.broadcast_world_commit(
+        world.world_id.clone(),
+        "server-reset".to_string(),
+        CommitTarget::Master,
+        None,
+        None,
+        world,
+    );
+}
+
+async fn run_admin_console(state: AppState, shutdown_tx: watch::Sender<bool>) {
+    tracing::info!("admin console ready: commands are `help`, `reset`, `exit`");
+
+    let mut lines = BufReader::new(io::stdin()).lines();
+    loop {
+        let line = match lines.next_line().await {
+            Ok(Some(value)) => value,
+            Ok(None) => break,
+            Err(error) => {
+                tracing::error!("admin console read failed: {}", error);
+                break;
+            }
+        };
+
+        let command = line.trim();
+        if command.is_empty() {
+            continue;
+        }
+
+        match command {
+            "help" => {
+                tracing::info!("admin commands: `help`, `reset`, `exit`");
+            }
+            "reset" => {
+                tracing::info!("admin reset requested");
+                reset_server_data(&state, "admin reset").await;
+                tracing::info!("world reset complete");
+            }
+            "exit" | "quit" => {
+                tracing::info!("admin shutdown requested");
+                let _ = shutdown_tx.send(true);
+                break;
+            }
+            unknown => {
+                tracing::warn!("unknown admin command '{}'; try `help`", unknown);
+            }
+        }
+    }
+}
+
+async fn wait_for_shutdown_signal(mut shutdown_rx: watch::Receiver<bool>) {
+    tokio::select! {
+        result = shutdown_rx.changed() => {
+            if result.is_ok() && *shutdown_rx.borrow() {
+                tracing::info!("shutdown signal received from admin console");
+            }
+        }
+        result = tokio::signal::ctrl_c() => {
+            if result.is_ok() {
+                tracing::info!("shutdown signal received from ctrl+c");
+            }
+        }
+    }
 }
 
 async fn health() -> Json<HealthResponse> {
@@ -188,12 +335,18 @@ async fn create_world(
     };
 
     match response {
-        Ok(world) => Ok((
-            StatusCode::CREATED,
-            Json(WorldMutationResponse {
-                world_id: world.world_id,
-            }),
-        )),
+        Ok(world) => {
+            if let Err(error) = persist_repository_snapshot(&state).await {
+                tracing::error!("failed to persist datastore after world create: {}", error);
+            }
+
+            Ok((
+                StatusCode::CREATED,
+                Json(WorldMutationResponse {
+                    world_id: world.world_id,
+                }),
+            ))
+        }
         Err(WorldMutationFailure::InvalidWorldId { message }) => Err((
             StatusCode::BAD_REQUEST,
             Json(WorldMutationErrorResponse {
@@ -303,6 +456,9 @@ async fn commit_world(
                 request.focus_sphere_id.clone(),
                 commit_response.world.clone(),
             );
+            if let Err(error) = persist_repository_snapshot(&state).await {
+                tracing::error!("failed to persist datastore after commit: {}", error);
+            }
 
             Ok(Json(commit_response))
         }
@@ -335,7 +491,12 @@ async fn delete_world(
     };
 
     match response {
-        Ok(()) => Ok(StatusCode::NO_CONTENT),
+        Ok(()) => {
+            if let Err(error) = persist_repository_snapshot(&state).await {
+                tracing::error!("failed to persist datastore after world delete: {}", error);
+            }
+            Ok(StatusCode::NO_CONTENT)
+        }
         Err(WorldMutationFailure::WorldNotFound { message }) => Err((
             StatusCode::NOT_FOUND,
             Json(WorldMutationErrorResponse {

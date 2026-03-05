@@ -50,6 +50,15 @@ interface WorldCommitAppliedMessage extends MultiplayerWorldCommit {
   type: "world_commit_applied";
 }
 
+export interface MultiplayerServerResetNotice {
+  reason: string;
+  world_id: string;
+}
+
+interface ServerResetMessage extends MultiplayerServerResetNotice {
+  type: "server_reset";
+}
+
 interface ErrorMessage {
   type: "error";
   message: string;
@@ -64,6 +73,7 @@ type ServerMessage =
   | StateSnapshotMessage
   | StateSnapshotDeltaMessage
   | WorldCommitAppliedMessage
+  | ServerResetMessage
   | ErrorMessage
   | PongMessage;
 
@@ -96,6 +106,7 @@ export interface MultiplayerClientCallbacks {
   onWelcome: (playerId: string) => void;
   onSnapshot: (snapshot: MultiplayerSnapshot) => void;
   onWorldCommit: (commit: MultiplayerWorldCommit) => void;
+  onServerReset: (notice: MultiplayerServerResetNotice) => void;
   onError: (message: string) => void;
 }
 
@@ -230,6 +241,11 @@ export class MultiplayerClient {
 
       if (parsed.type === "world_commit_applied") {
         this.callbacks?.onWorldCommit(parsed);
+        return;
+      }
+
+      if (parsed.type === "server_reset") {
+        this.callbacks?.onServerReset(parsed);
         return;
       }
 

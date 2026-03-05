@@ -267,6 +267,10 @@ pub enum ServerMultiplayerMessage {
         focus_sphere_id: Option<String>,
         world: WorldSnapshot,
     },
+    ServerReset {
+        reason: String,
+        world_id: String,
+    },
     Error {
         message: String,
     },
@@ -769,6 +773,12 @@ impl MultiplayerHub {
             focus_sphere_id,
             world,
         });
+    }
+
+    pub fn broadcast_server_reset(&self, reason: String, world_id: String) {
+        let _ = self
+            .tx
+            .send(ServerMultiplayerMessage::ServerReset { reason, world_id });
     }
 }
 

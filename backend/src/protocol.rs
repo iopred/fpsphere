@@ -38,15 +38,16 @@ impl TemporalWorldQuery {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        let (window_start_tick, window_end_tick) = match (self.window_start_tick, self.window_end_tick) {
-            (None, Some(_)) => {
-                return Err("window_end_tick requires window_start_tick".to_string())
-            }
-            (Some(start_tick), Some(end_tick)) if end_tick < start_tick => {
-                return Err("window_end_tick must be >= window_start_tick".to_string())
-            }
-            values => values,
-        };
+        let (window_start_tick, window_end_tick) =
+            match (self.window_start_tick, self.window_end_tick) {
+                (None, Some(_)) => {
+                    return Err("window_end_tick requires window_start_tick".to_string())
+                }
+                (Some(start_tick), Some(end_tick)) if end_tick < start_tick => {
+                    return Err("window_end_tick must be >= window_start_tick".to_string())
+                }
+                values => values,
+            };
 
         if let Some(tick) = self.tick {
             if window_start_tick.is_some_and(|start_tick| tick < start_tick) {
@@ -154,6 +155,24 @@ impl WorldMutationFailure {
     }
 }
 
+const WORLD_REPOSITORY_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedUserWorldBranch {
+    pub world_id: String,
+    pub user_id: String,
+    pub world: WorldSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedWorldRepository {
+    pub schema_version: u32,
+    pub masters: Vec<WorldSnapshot>,
+    pub user_worlds: Vec<PersistedUserWorldBranch>,
+    pub commit_seq: u64,
+}
+
+#[derive(Debug, Clone)]
 pub struct WorldRepository {
     masters: HashMap<String, WorldSnapshot>,
     user_worlds: HashMap<(String, String), WorldSnapshot>,
@@ -171,6 +190,97 @@ impl WorldRepository {
             user_worlds: HashMap::new(),
             commit_seq: 0,
         }
+    }
+
+    pub fn from_persisted_state(state: PersistedWorldRepository) -> Result<Self, String> {
+        if state.schema_version != WORLD_REPOSITORY_SCHEMA_VERSION {
+            return Err(format!(
+                "unsupported datastore schema version: {}",
+                state.schema_version
+            ));
+        }
+
+        let mut masters = HashMap::new();
+        for mut world in state.masters {
+            let world_id = world.world_id.trim().to_string();
+            if world_id.is_empty() {
+                return Err("persisted state contains empty world_id".to_string());
+            }
+
+            world.world_id = world_id.clone();
+            compact_shared_template_legacy_descendants(&mut world);
+            if masters.insert(world_id.clone(), world).is_some() {
+                return Err(format!(
+                    "persisted state contains duplicate world_id '{}'",
+                    world_id
+                ));
+            }
+        }
+
+        if masters.is_empty() {
+            return Err("persisted state contains no master worlds".to_string());
+        }
+
+        let mut user_worlds = HashMap::new();
+        for mut branch in state.user_worlds {
+            let world_id = branch.world_id.trim().to_string();
+            let user_id = branch.user_id.trim().to_string();
+            if world_id.is_empty() || user_id.is_empty() {
+                continue;
+            }
+            if !masters.contains_key(world_id.as_str()) {
+                continue;
+            }
+
+            branch.world.world_id = world_id.clone();
+            compact_shared_template_legacy_descendants(&mut branch.world);
+            user_worlds.insert((world_id, user_id), branch.world);
+        }
+
+        Ok(Self {
+            masters,
+            user_worlds,
+            commit_seq: state.commit_seq,
+        })
+    }
+
+    pub fn to_persisted_state(&self) -> PersistedWorldRepository {
+        let mut masters = self.masters.values().cloned().collect::<Vec<_>>();
+        masters.sort_by(|left, right| left.world_id.cmp(&right.world_id));
+
+        let mut user_worlds = self
+            .user_worlds
+            .iter()
+            .map(|((world_id, user_id), world)| PersistedUserWorldBranch {
+                world_id: world_id.clone(),
+                user_id: user_id.clone(),
+                world: world.clone(),
+            })
+            .collect::<Vec<_>>();
+        user_worlds.sort_by(|left, right| {
+            left.world_id
+                .cmp(&right.world_id)
+                .then(left.user_id.cmp(&right.user_id))
+        });
+
+        PersistedWorldRepository {
+            schema_version: WORLD_REPOSITORY_SCHEMA_VERSION,
+            masters,
+            user_worlds,
+            commit_seq: self.commit_seq,
+        }
+    }
+
+    pub fn reset_to_seed_world(&mut self, mut seed_world: WorldSnapshot) -> WorldSnapshot {
+        compact_shared_template_legacy_descendants(&mut seed_world);
+
+        let world_id = seed_world.world_id.clone();
+        self.masters.clear();
+        self.masters.insert(world_id, seed_world.clone());
+        self.user_worlds.clear();
+        self.commit_seq = 0;
+
+        seed_world
     }
 
     pub fn get_world_snapshot(
@@ -1758,5 +1868,82 @@ mod tests {
 
         assert_eq!(scaled_child.radius, 4.0);
         assert_eq!(scaled_child.position_3d, [24.0, -4.0, 24.0]);
+    }
+
+    #[test]
+    fn persisted_state_round_trip_preserves_master_and_user_worlds() {
+        let mut repository = WorldRepository::new(example_world_snapshot());
+        repository
+            .create_world("world-beta")
+            .expect("create world-beta should succeed");
+
+        let user_commit = repository
+            .commit(
+                "world-main",
+                CommitRequest {
+                    user_id: "alice".to_string(),
+                    base_tick: 999,
+                    operations: vec![CommitOperation::Create {
+                        sphere: make_test_sphere("sphere-user-branch-only-001"),
+                    }],
+                },
+            )
+            .expect("commit should succeed");
+        assert!(matches!(user_commit.saved_to, CommitTarget::User));
+
+        let restored = WorldRepository::from_persisted_state(repository.to_persisted_state())
+            .expect("restore repository from persisted state");
+
+        assert_eq!(
+            restored.list_world_ids(),
+            vec!["world-beta".to_string(), "world-main".to_string()]
+        );
+
+        let master_snapshot = restored
+            .get_world_snapshot("world-main", None)
+            .expect("master snapshot");
+        assert!(!master_snapshot
+            .entities
+            .iter()
+            .any(|entity| entity.id == "sphere-user-branch-only-001"));
+
+        let user_snapshot = restored
+            .get_world_snapshot("world-main", Some("alice"))
+            .expect("user snapshot");
+        assert!(user_snapshot
+            .entities
+            .iter()
+            .any(|entity| entity.id == "sphere-user-branch-only-001"));
+    }
+
+    #[test]
+    fn reset_to_seed_world_clears_additional_worlds_and_user_branches() {
+        let mut repository = WorldRepository::new(example_world_snapshot());
+        repository
+            .create_world("world-beta")
+            .expect("create world-beta should succeed");
+        repository
+            .commit(
+                "world-main",
+                CommitRequest {
+                    user_id: "alice".to_string(),
+                    base_tick: 999,
+                    operations: vec![CommitOperation::Create {
+                        sphere: make_test_sphere("sphere-user-branch-only-002"),
+                    }],
+                },
+            )
+            .expect("user commit should succeed");
+
+        repository.reset_to_seed_world(example_world_snapshot());
+
+        assert_eq!(repository.list_world_ids(), vec!["world-main".to_string()]);
+        let user_snapshot = repository
+            .get_world_snapshot("world-main", Some("alice"))
+            .expect("user snapshot should fall back to master");
+        assert!(!user_snapshot
+            .entities
+            .iter()
+            .any(|entity| entity.id == "sphere-user-branch-only-002"));
     }
 }

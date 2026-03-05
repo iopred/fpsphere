@@ -44,8 +44,9 @@ Current implementation includes:
    - In editor mode, use the Level Select panel to switch levels.
    - Use `Add` to create a new level and `Remove` to delete an existing level.
 10. Editor transform controls:
-   - Mouse wheel resizes the selected sphere radius.
+   - Mouse wheel resizes the selected sphere radius (pixel-normalized for trackpads).
    - Hold right mouse button to drag the selected sphere along your view direction.
+   - Hold `R` and move mouse to rotate template hosts (`yaw`/`pitch`).
 11. Sphere world navigation:
    - `F` in editor mode enters the template world of the selected sphere (`world_template > 0`).
    - `F` with no selected sphere exits back to the parent world.
@@ -87,6 +88,14 @@ Current implementation includes:
    - `POST http://127.0.0.1:4000/api/v1/world/world-main/commit`
 9. Multiplayer endpoint:
    - `ws://127.0.0.1:4000/ws?user_id=<id>&world_id=world-main`
+10. Backend admin console (stdin commands while `cargo run` is active):
+   - `help`: list admin commands.
+   - `reset`: reset datastore to seed world and notify clients to reload.
+   - `exit` / `quit`: gracefully stop backend server.
+11. Persistent datastore:
+   - Backend loads/saves world state as JSON.
+   - Default path: `backend/data/world-repository.json`.
+   - Override path with `WORLD_DATASTORE_PATH=/absolute/or/relative/path.json`.
 
 ## Current milestone status
 
@@ -130,6 +139,9 @@ Current implementation includes:
   - AOI multiplayer filtering:
     - websocket state snapshots are now filtered per observer by AOI membership instead of full-world player fanout.
     - observer inclusion is guaranteed; tie-break ordering remains deterministic.
+  - Backend datastore persistence + admin reset controls:
+    - backend now restores world state from disk on startup and persists create/delete/commit mutations.
+    - running backend now supports `reset` (seed restore + client reload notice) and `exit` commands via stdin.
   - Delta multiplayer snapshots:
     - server tracks per-connection snapshot baselines and emits `state_snapshot_delta` messages between periodic full snapshots.
     - client reconstructs authoritative full snapshots from deltas, with automatic fallback to next full baseline on mismatch.

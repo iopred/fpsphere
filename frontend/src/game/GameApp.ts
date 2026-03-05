@@ -28,6 +28,7 @@ import {
 import {
   MultiplayerClient,
   type MultiplayerSnapshot,
+  type MultiplayerServerResetNotice,
   type MultiplayerWorldCommit,
 } from "./multiplayerClient";
 import { LocalWorldStore, type WorldStoreSnapshot } from "./worldStore";
@@ -152,6 +153,7 @@ export class GameApp {
   private localPlayerId: string | null = null;
   private multiplayerStatus = "disconnected";
   private multiplayerError: string | null = null;
+  private serverResetReloadInFlight = false;
   private selectedAvatarId: AvatarId = DEFAULT_AVATAR_ID;
   private lastNetworkSendTick = 0;
   private nextInputSequence = 0;
@@ -1362,6 +1364,9 @@ export class GameApp {
         onWorldCommit: (commit) => {
           this.applyMultiplayerWorldCommit(commit);
         },
+        onServerReset: (notice) => {
+          void this.handleMultiplayerServerReset(notice);
+        },
         onError: (message) => {
           this.multiplayerError = message;
         },
@@ -1408,6 +1413,42 @@ export class GameApp {
         error instanceof Error
           ? `world sync failed: ${error.message}`
           : "world sync failed: unknown error";
+    }
+  }
+
+  private async handleMultiplayerServerReset(
+    notice: MultiplayerServerResetNotice,
+  ): Promise<void> {
+    if (this.serverResetReloadInFlight) {
+      return;
+    }
+
+    this.serverResetReloadInFlight = true;
+    this.multiplayerError = `server reset: ${notice.reason}`;
+
+    try {
+      await this.levelLifecycleController.refreshAvailableWorldIds({
+        preserveCurrentWorldId: false,
+      });
+      if (this.disposed) {
+        return;
+      }
+
+      await this.levelLifecycleController.selectWorldLevel(notice.world_id, true);
+      if (!this.disposed) {
+        this.multiplayerError = null;
+      }
+    } catch (error) {
+      if (this.disposed) {
+        return;
+      }
+
+      this.multiplayerError =
+        error instanceof Error
+          ? `server reset reload failed: ${error.message}`
+          : "server reset reload failed";
+    } finally {
+      this.serverResetReloadInFlight = false;
     }
   }
 

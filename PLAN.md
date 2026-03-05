@@ -15,6 +15,19 @@
 - [x] C5: M1 playable assembly
 - [x] C6: Editor mode interactions
 
+## 0.1 Sprint Update (Latest)
+
+- [x] Backend admin console commands:
+  - `help` for command discovery.
+  - `reset` to restore seed world data and broadcast a client reload notice.
+  - `exit`/`quit` for graceful backend shutdown.
+- [x] Backend persistence:
+  - startup restore from JSON datastore when present.
+  - commit/create/delete/reset now persist to datastore.
+  - datastore path configurable through `WORLD_DATASTORE_PATH`.
+- [x] Client reset handling:
+  - multiplayer now supports a `server_reset` notice and reloads world data in FPS + AR modes.
+
 ## 1. Project Intent
 
 Build a web-based FPS simulation platform where:

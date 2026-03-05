@@ -4,6 +4,7 @@ import { fetchWorldSeed, parseLoadedWorldSnapshot } from "../game/worldApi";
 import { buildSeedWorld } from "../game/worldSeed";
 import {
   MultiplayerClient,
+  type MultiplayerServerResetNotice,
   type MultiplayerSnapshot,
   type MultiplayerWorldCommit,
   type RemotePlayerState,
@@ -801,11 +802,21 @@ export class FpsphereArApp {
         onWorldCommit: (commit) => {
           this.applyMultiplayerWorldCommit(commit);
         },
+        onServerReset: (notice) => {
+          void this.handleMultiplayerServerReset(notice);
+        },
         onError: (message) => {
           console.warn("AR multiplayer error", message);
         },
       },
     });
+  }
+
+  private async handleMultiplayerServerReset(
+    notice: MultiplayerServerResetNotice,
+  ): Promise<void> {
+    this.updateStatus(`Server reset (${notice.reason}). Reloading "${notice.world_id}"...`);
+    await this.loadWorld(notice.world_id);
   }
 
   private applyMultiplayerSnapshot(snapshot: MultiplayerSnapshot): void {

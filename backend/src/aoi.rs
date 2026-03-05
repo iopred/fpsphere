@@ -211,7 +211,11 @@ mod tests {
 
         // player radius 48, edge 24 => [-2..2] across each axis => 125 cells.
         assert_eq!(keys.len(), 125);
-        assert!(keys.contains(&AoiPartitionKey { x: -2, y: -2, z: -2 }));
+        assert!(keys.contains(&AoiPartitionKey {
+            x: -2,
+            y: -2,
+            z: -2
+        }));
         assert!(keys.contains(&AoiPartitionKey { x: 2, y: 2, z: 2 }));
     }
 
