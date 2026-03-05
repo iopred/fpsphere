@@ -124,6 +124,38 @@ fn should_deliver_master_world_commit_for_context(
     master_world_commit_context_matches(session_world_context, commit_world_context)
 }
 
+fn should_deliver_world_commit_for_session(
+    session_world_id: &str,
+    session_user_id: &str,
+    session_world_context: Option<&MultiplayerWorldContext>,
+    commit_world_id: &str,
+    saved_to: &CommitTarget,
+    target_user_id: Option<&str>,
+    commit_world_context: Option<&MultiplayerWorldContext>,
+) -> bool {
+    match saved_to {
+        CommitTarget::Master => {
+            if commit_world_id == session_world_id {
+                return should_deliver_master_world_commit_for_context(
+                    session_world_context,
+                    commit_world_context,
+                );
+            }
+
+            true
+        }
+        CommitTarget::User => {
+            if commit_world_id != session_world_id {
+                return false;
+            }
+
+            target_user_id
+                .map(|value| value == session_user_id)
+                .unwrap_or(false)
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let _ = dotenvy::from_filename(".env");
@@ -700,22 +732,15 @@ async fn handle_ws_connection(
                         world_context: commit_world_context,
                         world,
                     }) => {
-                        if commit_world_id != world_id {
-                            continue;
-                        }
-
-                        let should_deliver = match saved_to {
-                            CommitTarget::Master => should_deliver_master_world_commit_for_context(
-                                session_world_context.as_ref(),
-                                commit_world_context.as_ref(),
-                            ),
-                            CommitTarget::User => {
-                                target_user_id
-                                    .as_deref()
-                                    .map(|value| value == session_user_id.as_str())
-                                    .unwrap_or(false)
-                            }
-                        };
+                        let should_deliver = should_deliver_world_commit_for_session(
+                            world_id.as_str(),
+                            session_user_id.as_str(),
+                            session_world_context.as_ref(),
+                            commit_world_id.as_str(),
+                            &saved_to,
+                            target_user_id.as_deref(),
+                            commit_world_context.as_ref(),
+                        );
 
                         if !should_deliver {
                             continue;
@@ -863,8 +888,12 @@ async fn send_ws_message(
 
 #[cfg(test)]
 mod tests {
-    use super::{should_deliver_master_world_commit_for_context, visible_to_others_from_mode};
+    use super::{
+        should_deliver_master_world_commit_for_context, should_deliver_world_commit_for_session,
+        visible_to_others_from_mode,
+    };
     use crate::multiplayer::MultiplayerWorldContext;
+    use crate::protocol::CommitTarget;
 
     #[test]
     fn master_world_commit_delivery_respects_focus_context() {
@@ -907,5 +936,71 @@ mod tests {
         assert!(!visible_to_others_from_mode(Some("hidden")));
         assert!(!visible_to_others_from_mode(Some("  hidden  ")));
         assert!(visible_to_others_from_mode(Some("unknown")));
+    }
+
+    #[test]
+    fn world_commit_delivery_allows_cross_world_master_sync() {
+        assert!(should_deliver_world_commit_for_session(
+            "world-main",
+            "user-a",
+            None,
+            "world-template-2",
+            &CommitTarget::Master,
+            None,
+            None,
+        ));
+    }
+
+    #[test]
+    fn world_commit_delivery_keeps_context_filter_for_same_world_master() {
+        let session_context = MultiplayerWorldContext {
+            root_world_id: "world-main".to_string(),
+            instance_path: vec!["sphere-template-root-1".to_string()],
+        };
+        let different_commit_context = MultiplayerWorldContext {
+            root_world_id: "world-main".to_string(),
+            instance_path: vec!["sphere-template-root-2".to_string()],
+        };
+
+        assert!(!should_deliver_world_commit_for_session(
+            "world-main",
+            "user-a",
+            Some(&session_context),
+            "world-main",
+            &CommitTarget::Master,
+            None,
+            Some(&different_commit_context),
+        ));
+    }
+
+    #[test]
+    fn world_commit_delivery_limits_user_branch_updates_to_same_user_and_world() {
+        assert!(should_deliver_world_commit_for_session(
+            "world-main",
+            "user-a",
+            None,
+            "world-main",
+            &CommitTarget::User,
+            Some("user-a"),
+            None,
+        ));
+        assert!(!should_deliver_world_commit_for_session(
+            "world-main",
+            "user-a",
+            None,
+            "world-template-2",
+            &CommitTarget::User,
+            Some("user-a"),
+            None,
+        ));
+        assert!(!should_deliver_world_commit_for_session(
+            "world-main",
+            "user-a",
+            None,
+            "world-main",
+            &CommitTarget::User,
+            Some("user-b"),
+            None,
+        ));
     }
 }

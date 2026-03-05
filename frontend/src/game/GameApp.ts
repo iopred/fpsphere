@@ -59,6 +59,7 @@ import {
   decodeTemplateIdFromInstanceWorldId,
   resolveTemplateIdFromEntity,
 } from "./worldInstanceRefs";
+import { tintWorldInstanceChildDimensions } from "./worldInstanceTint";
 
 const FIXED_STEP_SECONDS = 1 / 60;
 const MOVE_SPEED = 18;
@@ -1209,7 +1210,20 @@ export class GameApp {
             hostSphere.position3d[1] + rotatedOffsetY,
             hostSphere.position3d[2] + rotatedOffsetZ,
           ],
-          dimensions: { ...referencedChild.dimensions },
+          dimensions: tintWorldInstanceChildDimensions({
+            childDimensions: referencedChild.dimensions,
+            hostDimensions: hostSphere.dimensions,
+            defaultColorChannels: {
+              r: DEFAULT_SPHERE_COLOR_RED,
+              g: DEFAULT_SPHERE_COLOR_GREEN,
+              b: DEFAULT_SPHERE_COLOR_BLUE,
+            },
+            colorDimensionKeys: {
+              red: SPHERE_COLOR_RED_DIMENSION,
+              green: SPHERE_COLOR_GREEN_DIMENSION,
+              blue: SPHERE_COLOR_BLUE_DIMENSION,
+            },
+          }),
           timeWindow: { ...hostSphere.timeWindow },
           tags: [
             ...referencedChild.tags.filter(
@@ -1608,25 +1622,40 @@ export class GameApp {
   }
 
   private applyMultiplayerWorldCommit(commit: MultiplayerWorldCommit): void {
-    if (commit.world_id !== this.currentWorldId) {
+    if (commit.saved_to === "user" && commit.user_id !== this.userId) {
       return;
     }
 
-    if (commit.saved_to === "user" && commit.user_id !== this.userId) {
+    const commitTargetsCurrentWorld = commit.world_id === this.currentWorldId;
+    const shouldRefreshInstancedWorld =
+      !commitTargetsCurrentWorld &&
+      (this.instancedWorldById.has(commit.world_id) ||
+        this.currentWorldReferencesInstancedWorld(commit.world_id));
+    if (!commitTargetsCurrentWorld && !shouldRefreshInstancedWorld) {
       return;
     }
 
     try {
       const loaded = parseLoadedWorldSnapshot(commit.world);
-      this.worldStore.apply({
-        type: "hydrateWorld",
-        world: loaded.world,
+      if (commitTargetsCurrentWorld) {
+        this.worldStore.apply({
+          type: "hydrateWorld",
+          world: loaded.world,
+        });
+        this.levelLifecycleController.applyMultiplayerWorldCommit(
+          commit.commit_id,
+          commit.saved_to,
+          loaded.tick,
+        );
+        this.multiplayerError = null;
+        return;
+      }
+
+      this.instancedWorldById.set(commit.world_id, {
+        parent: cloneSphereEntity(loaded.world.parent),
+        children: loaded.world.children.map((entity) => cloneSphereEntity(entity)),
       });
-      this.levelLifecycleController.applyMultiplayerWorldCommit(
-        commit.commit_id,
-        commit.saved_to,
-        loaded.tick,
-      );
+      this.syncObstaclesFromSnapshot(this.worldStore.getSnapshot());
       this.multiplayerError = null;
     } catch (error) {
       this.multiplayerError =
@@ -1634,6 +1663,24 @@ export class GameApp {
           ? `world sync failed: ${error.message}`
           : "world sync failed: unknown error";
     }
+  }
+
+  private currentWorldReferencesInstancedWorld(worldIdInput: string): boolean {
+    const worldId = worldIdInput.trim();
+    if (!worldId) {
+      return false;
+    }
+
+    const snapshot = this.worldStore.getSnapshot();
+    const rootView = snapshot.parent.parentId === null;
+    const visibleChildren = rootView
+      ? snapshot.children.filter((child) => !this.isTemplateRootSphere(child))
+      : snapshot.children;
+    const templateHosts = rootView
+      ? [snapshot.parent, ...visibleChildren]
+      : [...visibleChildren];
+
+    return templateHosts.some((host) => host.instanceWorldId?.trim() === worldId);
   }
 
   private async handleMultiplayerServerReset(
