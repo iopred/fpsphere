@@ -1,0 +1,11 @@
+fpsphere.example.com {
+  encode zstd gzip
+
+  @api path /api/* /healthz
+  reverse_proxy @api 127.0.0.1:4000
+
+  @ws path /ws*
+  reverse_proxy @ws 127.0.0.1:4000
+
+  reverse_proxy 127.0.0.1:4001
+}

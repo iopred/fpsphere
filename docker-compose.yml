@@ -1,0 +1,28 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: fpsphere-backend:latest
+    restart: unless-stopped
+    environment:
+      BIND_ADDR: 0.0.0.0:4000
+      WORLD_DATASTORE_PATH: /app/data/world-repository.json
+    volumes:
+      - fpsphere_data:/app/data
+    ports:
+      - "4000:4000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: fpsphere-frontend:latest
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "4001:4001"
+
+volumes:
+  fpsphere_data:

@@ -97,6 +97,50 @@ Current implementation includes:
    - Default path: `backend/data/world-repository.json`.
    - Override path with `WORLD_DATASTORE_PATH=/absolute/or/relative/path.json`.
 
+## Docker deployment
+
+Build and run the full stack (frontend + backend):
+
+1. From repo root:
+   - `docker compose up -d --build`
+2. Services:
+   - Frontend: `http://127.0.0.1:4001`
+   - Backend API: `http://127.0.0.1:4000`
+3. Stop:
+   - `docker compose down`
+4. Stop and remove persisted world data volume:
+   - `docker compose down -v`
+
+Notes:
+- Backend image: `backend/Dockerfile`
+- Frontend image: `frontend/Dockerfile`
+- Compose stack: `docker-compose.yml`
+- Backend data is persisted in Docker volume `fpsphere_data`.
+
+## Caddy reverse proxy (host machine)
+
+If Caddy runs on the host and Docker publishes ports `4001` and `4000`, add a site block like:
+
+```caddyfile
+fpsphere.example.com {
+  encode zstd gzip
+
+  @api path /api/* /healthz
+  reverse_proxy @api 127.0.0.1:4000
+
+  @ws path /ws*
+  reverse_proxy @ws 127.0.0.1:4000
+
+  reverse_proxy 127.0.0.1:4001
+}
+```
+
+Then reload Caddy:
+- `sudo caddy reload --config /etc/caddy/Caddyfile`
+
+Reference config file:
+- `deploy/Caddyfile.example`
+
 ## Current milestone status
 
 - M0 foundations: complete.
