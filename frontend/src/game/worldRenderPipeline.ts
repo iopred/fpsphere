@@ -392,7 +392,8 @@ export function expandWorldRenderEntities({
   }
 
   const fallbackTemplateHosts = templateHosts.filter((host) => {
-    if (host.instanceWorldId?.trim()) {
+    // Legacy static-template fallback applies only when the host has no resolvable world reference.
+    if (resolveReferencedWorldId(host)) {
       return false;
     }
 

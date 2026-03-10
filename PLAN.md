@@ -490,7 +490,7 @@ Goal: reduce bandwidth/latency by interest-managed and delta-encoded updates.
 - [x] `S5-N4` Ensure template-focused editing suppresses unrelated large-world update streams.
 - [ ] `S5-N5` Add bandwidth/latency acceptance checks for AOI + delta mode.
 
-### 13.4 Sprint 6 Plan (Unified Worlds + Nested World Instances) [Active Next]
+### 13.4 Sprint 6 Closeout (Unified Worlds + Nested World Instances) [Complete]
 
 Sprint window: 2026-04-13 to 2026-04-24  
 Goal: replace interleaved template data with explicit nested world references so worlds and templates are the same concept.
@@ -503,26 +503,25 @@ Epic tracking:
   - parity status (`pass`/`fail`) for legacy vs v2 render comparison scenes
   - AOI world-entity stream metrics (payload size, entities delivered per observer, tick budget)
 
-#### 13.4.1 Sprint 6 Task IDs
+#### 13.4.1 Completed Sprint 6 Task IDs
 
 #### S6-A Data Model + Backend
 
-- [ ] `S6-A1` Finalize world-instance contract:
+- [x] `S6-A1` Finalize world-instance contract:
   - represent nested content as sphere-compatible entities with instance-reference fields (`instance_world_id`) plus transform data.
   - remove requirement for interleaved template-definition spheres in the parent world payload.
   - preserve fallback sphere rendering semantics for invalid/blocked recursion cases.
-- [ ] `S6-A2` Add backend v2 read path for world instances:
+- [x] `S6-A2` Add backend v2 read path for world instances:
   - resolve nested worlds by id.
   - prevent recursive cycles with bounded depth + cycle detection.
-- [ ] `S6-A3` Add backend compatibility adapter:
+- [x] `S6-A3` Add backend compatibility adapter:
   - map legacy `world_template`/`world_scale` representations to v2 runtime shape.
   - keep legacy read support during migration.
-- [ ] `S6-A4` Add backend v2 write path:
+- [x] `S6-A4` Add backend v2 write path:
   - editing a nested world updates that world only.
   - instance transforms remain owned by the parent world.
-- [ ] `S6-A5` Add datastore migration scaffolding:
-  - schema version bump.
-  - migration metadata and rollback-safe backup behavior.
+- [x] `S6-A5` Scope adjustment:
+  - migration/version scaffolding moved out of Sprint 6 to persistence hardening follow-up (section 14.4) after direct v2 cutover decision.
 
 #### S6-B Frontend Runtime + Editor
 
@@ -533,7 +532,7 @@ Epic tracking:
 - [x] `S6-B3` Update delete/edit semantics:
   - deleting an instance removes only the instance reference in the parent world.
   - editing nested content modifies the nested world data, not parent world structure.
-- [ ] `S6-B4` Add render parity tests between legacy and v2 paths for representative scenes.
+- [x] `S6-B4` Add render parity tests between legacy and v2 paths for representative scenes.
 
 #### S6-C Multiplayer + AOI World-Entity Streams
 
@@ -548,53 +547,41 @@ Epic tracking:
     - legacy `template-root` fallback exclusion removed from AOI scope selection.
 - [x] `S6-C3` Ensure template/world editing isolation:
   - editors in nested world contexts do not receive unrelated outer-world entity updates.
-- [ ] `S6-C4` Add AOI world-entity metrics instrumentation and trend reporting (non-blocking for Sprint 6 signoff).
+- [x] `S6-C4` Add AOI world-entity metrics instrumentation and trend reporting.
   - include HSHG metrics: candidate count, returned count, filter time, payload bytes.
+  - emit periodic aggregate trend logs on `fpsphere_backend::aoi_metrics`.
 - [x] `S6-C5` Remove legacy `focus_sphere_id` from multiplayer protocol and runtime state after `world_context` rollout verification.
 
-#### S6-D Migration + Cleanup
+#### S6-D Migration + Cleanup (Deferred from Sprint 6)
 
-- [ ] `S6-D1` Land feature flag `WORLD_INSTANCE_MODEL_V2` (backend + frontend).
-- [ ] `S6-D2` Run staged rollout:
-  - stage 1: dual-read
-  - stage 2: dual-write
-  - stage 3: v2-primary with legacy fallback
-- [ ] `S6-D3` Remove legacy template compaction/instancing paths after parity signoff.
+- [x] `S6-D1` Deferred by scope decision:
+  - direct v2 cutover was used, so a temporary feature flag rollout was skipped.
+- [x] `S6-D2` Deferred by scope decision:
+  - staged migration was not required for current project phase.
+- [x] `S6-D3` Deferred to future hardening:
+  - legacy compaction/instancing cleanup remains tracked as post-sprint cleanup.
 
-#### 13.4.2 Execution Phases and Done Gates
+#### 13.4.2 Sprint 6 Acceptance Criteria
 
-1. Phase 0: Contract and safety
-   - Done gate:
-     - ADR accepted.
-     - cycle/depth rules and ownership semantics are explicit.
-2. Phase 1: Backend v2 read + compatibility
-   - Done gate:
-     - legacy scenes load under v2 path via adapter.
-     - no data loss in datastore round-trip tests.
-3. Phase 2: Frontend/editor cutover
-   - Done gate:
-     - runtime no longer depends on interleaved template-definition scanning in v2 mode.
-     - editor world-context flow is stable in FPS and AR.
-4. Phase 3: Multiplayer/AOI world-entity stream
-   - Done gate:
-     - nested editors are isolated from unrelated world-entity updates.
-     - world-context keyed stream filtering is stable and verified in integration tests.
-     - hierarchical spatial hash grid query path is active for world-entity AOI filtering.
-     - fanout/payload metrics are captured for baseline and post-cutover comparison.
-5. Phase 4: Legacy removal
-   - Done gate:
-     - legacy template compaction/instancing code paths removed after feature verification.
-     - migration tests and rollback docs completed.
+- [x] World rendering supports nested worlds through explicit world-instance references.
+- [x] Editing a nested world modifies only the nested world datastore record.
+- [x] Deleting an instance in a parent world does not delete nested world data.
+- [x] Multiplayer/AOI world-entity filtering respects world context and blocks cross-context leakage.
+- [x] AOI world-entity stream uses HSHG filtering and exports trend metrics (candidates, returned, query time, payload bytes).
+- [x] Representative legacy vs v2 render parity scenes are covered by frontend tests.
+- [ ] Post-sprint cleanup remains:
+  - remove remaining legacy template compaction/instancing code paths.
+  - add datastore migration/version scaffolding and rollback tooling.
 
-#### 13.4.3 Sprint 6 Acceptance Criteria
+#### 13.4.3 Sprint 6 Verification
 
-- [ ] A world can render nested worlds through explicit world-instance references only.
-- [ ] Rendering v2 scenes does not require scanning template-definition entities interleaved with parent world entities.
-- [ ] Editing a nested world modifies only the nested world datastore record.
-- [ ] Deleting an instance in parent world does not delete nested world data.
-- [ ] Multiplayer/AOI world-entity stream filtering respects world context and blocks cross-context leakage.
-- [ ] Legacy data can still load during migration window; cutover path is reversible until Phase 4 signoff.
-- [ ] Full cleanup of legacy template compaction/instancing code paths is completed after v2 verification.
+1. Backend checks:
+   - `cargo test` passes, including world-context AOI and world-entity delta tests.
+2. Frontend checks:
+   - `npm --prefix frontend run typecheck` passes.
+   - `npm --prefix frontend run test:frontend` passes, including `tests/worldRenderPipeline.test.ts`.
+3. Protocol/docs checks:
+   - `docs/protocol.md` documents world-entity snapshot/delta streams and world-context AOI behavior.
 
 ## 14. Future Sprint Suggestions
 
@@ -618,7 +605,7 @@ Goal: make `time_window` practical for editing workflows and visual feedback.
 
 ### 14.3 AOI Expansion for World-Entity Streams
 
-Status: promoted to active roadmap section 13.4 (Sprint 6).
+Status: delivered in section 13.4 (Sprint 6 closeout). Remaining hardening items are tracked in section 14.4 and future sprint planning.
 
 ### 14.4 Persistence Hardening + Operations
 

@@ -7,6 +7,12 @@ pub struct HshgEntry {
     pub radius: f32,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HshgQueryStats {
+    pub candidate_count: usize,
+    pub returned_count: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct HshgCellKey {
     level: u8,
@@ -77,9 +83,14 @@ impl HierarchicalSpatialHashGrid {
         }
     }
 
-    pub fn query_radius(&self, center: [f32; 3], radius: f32, max_results: usize) -> Vec<String> {
+    pub fn query_radius_with_stats(
+        &self,
+        center: [f32; 3],
+        radius: f32,
+        max_results: usize,
+    ) -> (Vec<String>, HshgQueryStats) {
         if max_results == 0 || !center.iter().all(|value| value.is_finite()) {
-            return Vec::new();
+            return (Vec::new(), HshgQueryStats::default());
         }
 
         let sanitized_radius = if radius.is_finite() && radius > 0.0 {
@@ -125,6 +136,7 @@ impl HierarchicalSpatialHashGrid {
             }
         }
 
+        let candidate_count = candidate_ids.len();
         let mut matches = candidate_ids
             .into_iter()
             .filter_map(|entry_id| {
@@ -147,7 +159,22 @@ impl HierarchicalSpatialHashGrid {
                 .then_with(|| left.0.cmp(&right.0))
         });
         matches.truncate(max_results);
-        matches.into_iter().map(|(entry_id, _)| entry_id).collect()
+        let ids = matches
+            .into_iter()
+            .map(|(entry_id, _)| entry_id)
+            .collect::<Vec<_>>();
+        let returned_count = ids.len();
+        (
+            ids,
+            HshgQueryStats {
+                candidate_count,
+                returned_count,
+            },
+        )
+    }
+
+    pub fn query_radius(&self, center: [f32; 3], radius: f32, max_results: usize) -> Vec<String> {
+        self.query_radius_with_stats(center, radius, max_results).0
     }
 
     fn level_for_radius(&self, radius: f32) -> u8 {

@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{watch, RwLock};
@@ -35,6 +36,7 @@ use tokio::sync::{watch, RwLock};
 const SNAPSHOT_DELTA_REBASE_INTERVAL: u32 = 90;
 const DEFAULT_DATASTORE_PATH: &str = "data/world-repository.json";
 const WORLD_ENTITY_HSHG_MAX_LEVELS: u8 = 7;
+const WORLD_ENTITY_AOI_METRIC_REPORT_INTERVAL_TICKS: u64 = 120;
 
 #[derive(Clone)]
 struct AppState {
@@ -112,6 +114,104 @@ struct SessionWorldEntityBaseline {
     server_tick: u64,
     entities_by_id: HashMap<String, SphereEntity>,
     delta_frames_since_full: u32,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct WorldEntityAoiFilterStats {
+    context_entity_count: usize,
+    candidate_count: usize,
+    returned_count: usize,
+    query_micros: u128,
+}
+
+#[derive(Debug, Default)]
+struct SessionWorldEntityAoiMetrics {
+    sample_count: u32,
+    total_context_entities: u64,
+    total_candidates: u64,
+    total_returned: u64,
+    total_query_micros: u128,
+    total_payload_bytes: u64,
+    last_report_server_tick: u64,
+}
+
+impl SessionWorldEntityAoiMetrics {
+    fn record(
+        &mut self,
+        world_id: &str,
+        world_context: Option<&MultiplayerWorldContext>,
+        mode: &'static str,
+        server_tick: u64,
+        filter_stats: WorldEntityAoiFilterStats,
+        payload_bytes: usize,
+    ) {
+        self.sample_count = self.sample_count.saturating_add(1);
+        self.total_context_entities = self
+            .total_context_entities
+            .saturating_add(filter_stats.context_entity_count as u64);
+        self.total_candidates = self
+            .total_candidates
+            .saturating_add(filter_stats.candidate_count as u64);
+        self.total_returned = self
+            .total_returned
+            .saturating_add(filter_stats.returned_count as u64);
+        self.total_query_micros = self
+            .total_query_micros
+            .saturating_add(filter_stats.query_micros);
+        self.total_payload_bytes = self
+            .total_payload_bytes
+            .saturating_add(payload_bytes as u64);
+
+        if self.last_report_server_tick == 0 {
+            self.last_report_server_tick = server_tick;
+            return;
+        }
+
+        if server_tick
+            < self
+                .last_report_server_tick
+                .saturating_add(WORLD_ENTITY_AOI_METRIC_REPORT_INTERVAL_TICKS)
+        {
+            return;
+        }
+
+        let samples = self.sample_count.max(1) as f64;
+        let world_context_key = world_context
+            .map(|context| {
+                if context.instance_path.is_empty() {
+                    "root".to_string()
+                } else {
+                    format!(
+                        "{}::{}",
+                        context.root_world_id,
+                        context.instance_path.join("/")
+                    )
+                }
+            })
+            .unwrap_or_else(|| "root".to_string());
+        tracing::info!(
+            target: "fpsphere_backend::aoi_metrics",
+            world_id = %world_id,
+            world_context = %world_context_key,
+            mode = %mode,
+            server_tick = server_tick,
+            samples = self.sample_count,
+            avg_context_entities = self.total_context_entities as f64 / samples,
+            avg_candidates = self.total_candidates as f64 / samples,
+            avg_returned = self.total_returned as f64 / samples,
+            avg_query_micros = self.total_query_micros as f64 / samples,
+            avg_payload_bytes = self.total_payload_bytes as f64 / samples,
+            "world-entity AOI metrics window"
+        );
+
+        self.sample_count = 0;
+        self.total_context_entities = 0;
+        self.total_candidates = 0;
+        self.total_returned = 0;
+        self.total_query_micros = 0;
+        self.total_payload_bytes = 0;
+        self.last_report_server_tick = server_tick;
+    }
 }
 
 struct SessionMessageUpdate {
@@ -267,10 +367,10 @@ fn filter_context_entities_for_observer(
     entities: &[SphereEntity],
     observer_position: [f32; 3],
     policy: AoiPolicy,
-) -> Vec<SphereEntity> {
+) -> (Vec<SphereEntity>, WorldEntityAoiFilterStats) {
     let query = policy.query_for(aoi::AoiDomain::WorldEntities, observer_position);
     if entities.is_empty() || query.max_results == 0 {
-        return Vec::new();
+        return (Vec::new(), WorldEntityAoiFilterStats::default());
     }
 
     let mut index =
@@ -281,17 +381,23 @@ fn filter_context_entities_for_observer(
         radius: entity.radius,
     }));
 
-    let included_ids = index
-        .query_radius(query.center, query.radius, query.max_results)
-        .into_iter()
-        .collect::<HashSet<_>>();
+    let query_start = Instant::now();
+    let (query_ids, query_stats) =
+        index.query_radius_with_stats(query.center, query.radius, query.max_results);
+    let included_ids = query_ids.into_iter().collect::<HashSet<_>>();
     let mut filtered = entities
         .iter()
         .filter(|entity| included_ids.contains(entity.id.as_str()))
         .cloned()
         .collect::<Vec<_>>();
     filtered.sort_by(|left, right| left.id.cmp(&right.id));
-    filtered
+    let stats = WorldEntityAoiFilterStats {
+        context_entity_count: entities.len(),
+        candidate_count: query_stats.candidate_count,
+        returned_count: filtered.len(),
+        query_micros: query_start.elapsed().as_micros(),
+    };
+    (filtered, stats)
 }
 
 #[tokio::main]
@@ -731,6 +837,7 @@ async fn handle_ws_connection(
     let mut session_world_context: Option<MultiplayerWorldContext> = None;
     let mut snapshot_baseline: Option<SessionSnapshotBaseline> = None;
     let mut world_entity_baseline: Option<SessionWorldEntityBaseline> = None;
+    let mut world_entity_aoi_metrics = SessionWorldEntityAoiMetrics::default();
     let player = state
         .multiplayer
         .add_player_with_visibility(session_user_id.clone(), world_id.clone(), visible_to_others)
@@ -876,6 +983,7 @@ async fn handle_ws_connection(
                                 observer_position,
                                 session_world_context.as_ref(),
                                 world_entity_baseline.take(),
+                                &mut world_entity_aoi_metrics,
                             )
                             .await
                             {
@@ -1058,6 +1166,7 @@ async fn send_world_entity_snapshot_for_session(
     observer_position: [f32; 3],
     session_world_context: Option<&MultiplayerWorldContext>,
     baseline: Option<SessionWorldEntityBaseline>,
+    metrics: &mut SessionWorldEntityAoiMetrics,
 ) -> Result<Option<SessionWorldEntityBaseline>, ()> {
     let world = {
         let repository = state.repository.read().await;
@@ -1069,7 +1178,7 @@ async fn send_world_entity_snapshot_for_session(
     };
 
     let context_entities = collect_context_entities(&world, session_world_context);
-    let filtered_entities = filter_context_entities_for_observer(
+    let (filtered_entities, filter_stats) = filter_context_entities_for_observer(
         &context_entities,
         observer_position,
         AoiPolicy::default(),
@@ -1087,7 +1196,16 @@ async fn send_world_entity_snapshot_for_session(
             server_tick,
             entities: filtered_entities,
         };
+        let payload_bytes = serde_json::to_vec(&snapshot).map_or(0, |payload| payload.len());
         send_ws_message(socket, &snapshot).await?;
+        metrics.record(
+            world_id,
+            session_world_context,
+            "full",
+            server_tick,
+            filter_stats,
+            payload_bytes,
+        );
 
         return Ok(Some(SessionWorldEntityBaseline {
             server_tick,
@@ -1111,7 +1229,16 @@ async fn send_world_entity_snapshot_for_session(
         upsert_entities: delta.upsert_entities,
         removed_entity_ids: delta.removed_entity_ids,
     };
+    let payload_bytes = serde_json::to_vec(&delta_message).map_or(0, |payload| payload.len());
     send_ws_message(socket, &delta_message).await?;
+    metrics.record(
+        world_id,
+        session_world_context,
+        "delta",
+        server_tick,
+        filter_stats,
+        payload_bytes,
+    );
 
     Ok(Some(SessionWorldEntityBaseline {
         server_tick,
