@@ -5,9 +5,9 @@
 - [x] M0: Foundations
 - [x] M1: Local Playable Sphere
 - [x] M2: Multiplayer Slice
-- [ ] M3: Avatar Presence
-- [ ] M4: Temporal Queries and Animation Feedback
-- [ ] M5: AOI and Delta Networking
+- [x] M3: Avatar Presence
+- [x] M4: Temporal Queries and Animation Feedback
+- [x] M5: AOI and Delta Networking
 - [x] C1: Rendering app shell
 - [x] C2: FPS controller
 - [x] C3: Sphere physics integration
@@ -488,7 +488,7 @@ Goal: reduce bandwidth/latency by interest-managed and delta-encoded updates.
 - [x] `S5-N2` Filter outbound updates by AOI membership.
 - [x] `S5-N3` Add delta snapshot protocol with baseline tracking and fallback full snapshots.
 - [x] `S5-N4` Ensure template-focused editing suppresses unrelated large-world update streams.
-- [ ] `S5-N5` Add bandwidth/latency acceptance checks for AOI + delta mode.
+- [x] `S5-N5` Add bandwidth/latency acceptance checks for AOI + delta mode ([docs/sprint-5-closeout.md](docs/sprint-5-closeout.md)).
 
 ### 13.4 Sprint 6 Closeout (Unified Worlds + Nested World Instances) [Complete]
 
@@ -571,8 +571,11 @@ Epic tracking:
 - [x] Multiplayer/AOI world-entity filtering respects world context and blocks cross-context leakage.
 - [x] AOI world-entity stream uses HSHG filtering and exports trend metrics (candidates, returned, query time, payload bytes).
 - [x] Representative legacy vs v2 render parity scenes are covered by frontend tests.
-- [ ] Post-sprint cleanup remains:
-  - add datastore migration/version scaffolding and rollback tooling.
+- [x] Datastore migration/version scaffolding and rollback safety are implemented:
+  - persisted schema bumped to v2 with in-code v1 -> v2 migration.
+  - migration rewrites legacy world-instance references to explicit `instance_world_id`.
+  - startup migration creates an on-disk datastore backup before rewriting migrated state.
+  - datastore writes use temp-file + atomic rename.
 
 #### 13.4.3 Sprint 6 Verification
 

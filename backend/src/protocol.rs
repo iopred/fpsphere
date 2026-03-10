@@ -161,7 +161,18 @@ impl WorldMutationFailure {
     }
 }
 
-const WORLD_REPOSITORY_SCHEMA_VERSION: u32 = 1;
+const WORLD_REPOSITORY_SCHEMA_VERSION: u32 = 2;
+const OLDEST_SUPPORTED_WORLD_REPOSITORY_SCHEMA_VERSION: u32 = 1;
+
+const LEGACY_WORLD_TEMPLATE_DIMENSION: &str = "world_template";
+const LEGACY_WORLD_SCALE_DIMENSION: &str = "world_scale";
+const LEGACY_TEMPLATE_ROOT_TAG: &str = "template-root";
+const LEGACY_TEMPLATE_DEFINITION_TAG: &str = "template-definition";
+const LEGACY_TEMPLATE_INSTANCE_WORLD_PREFIX: &str = "world-template-";
+
+pub const fn world_repository_schema_version() -> u32 {
+    WORLD_REPOSITORY_SCHEMA_VERSION
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedUserWorldBranch {
@@ -228,13 +239,22 @@ impl WorldRepository {
         })
     }
 
-    pub fn from_persisted_state(state: PersistedWorldRepository) -> Result<Self, String> {
-        if state.schema_version != WORLD_REPOSITORY_SCHEMA_VERSION {
+    pub fn from_persisted_state(mut state: PersistedWorldRepository) -> Result<Self, String> {
+        if state.schema_version > WORLD_REPOSITORY_SCHEMA_VERSION {
             return Err(format!(
-                "unsupported datastore schema version: {}",
-                state.schema_version
+                "unsupported future datastore schema version: {} (current: {})",
+                state.schema_version, WORLD_REPOSITORY_SCHEMA_VERSION
             ));
         }
+
+        if state.schema_version < OLDEST_SUPPORTED_WORLD_REPOSITORY_SCHEMA_VERSION {
+            return Err(format!(
+                "unsupported datastore schema version: {} (oldest supported: {})",
+                state.schema_version, OLDEST_SUPPORTED_WORLD_REPOSITORY_SCHEMA_VERSION
+            ));
+        }
+
+        migrate_persisted_state_to_current(&mut state)?;
 
         let mut masters = HashMap::new();
         for mut world in state.masters {
@@ -656,6 +676,107 @@ fn filter_world_snapshot_by_time_window(
             .filter(|entity| included_ids.contains(&entity.id))
             .collect(),
     }
+}
+
+fn migrate_persisted_state_to_current(state: &mut PersistedWorldRepository) -> Result<(), String> {
+    while state.schema_version < WORLD_REPOSITORY_SCHEMA_VERSION {
+        match state.schema_version {
+            1 => migrate_schema_v1_to_v2(state),
+            unsupported => {
+                return Err(format!(
+                    "unsupported datastore schema migration path from {} to {}",
+                    unsupported, WORLD_REPOSITORY_SCHEMA_VERSION
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn migrate_schema_v1_to_v2(state: &mut PersistedWorldRepository) {
+    for world in &mut state.masters {
+        migrate_world_snapshot_v1_to_v2(world);
+    }
+    for branch in &mut state.user_worlds {
+        migrate_world_snapshot_v1_to_v2(&mut branch.world);
+    }
+    state.schema_version = 2;
+}
+
+fn migrate_world_snapshot_v1_to_v2(world: &mut WorldSnapshot) {
+    for entity in &mut world.entities {
+        let normalized_instance_world_id = entity
+            .instance_world_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let migrated_instance_world_id = normalized_instance_world_id.or_else(|| {
+            read_legacy_template_id(
+                entity
+                    .dimensions
+                    .get(LEGACY_WORLD_TEMPLATE_DIMENSION)
+                    .copied(),
+            )
+            .map(|template_id| format!("{}{}", LEGACY_TEMPLATE_INSTANCE_WORLD_PREFIX, template_id))
+        });
+        entity.instance_world_id = migrated_instance_world_id;
+
+        entity.dimensions.remove(LEGACY_WORLD_TEMPLATE_DIMENSION);
+        entity.dimensions.remove(LEGACY_WORLD_SCALE_DIMENSION);
+    }
+
+    strip_legacy_template_entities(world);
+}
+
+fn read_legacy_template_id(value: Option<f32>) -> Option<i32> {
+    let value = value?;
+    if !value.is_finite() {
+        return None;
+    }
+
+    let truncated = value.trunc();
+    if truncated <= 0.0 || truncated > i32::MAX as f32 {
+        return None;
+    }
+
+    Some(truncated as i32)
+}
+
+fn strip_legacy_template_entities(world: &mut WorldSnapshot) {
+    let mut remove_ids = world
+        .entities
+        .iter()
+        .filter(|entity| {
+            entity
+                .tags
+                .iter()
+                .any(|tag| tag == LEGACY_TEMPLATE_ROOT_TAG || tag == LEGACY_TEMPLATE_DEFINITION_TAG)
+        })
+        .map(|entity| entity.id.clone())
+        .collect::<HashSet<_>>();
+
+    if remove_ids.is_empty() {
+        return;
+    }
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for entity in &world.entities {
+            let Some(parent_id) = entity.parent_id.as_deref() else {
+                continue;
+            };
+            if remove_ids.contains(parent_id) && remove_ids.insert(entity.id.clone()) {
+                changed = true;
+            }
+        }
+    }
+
+    world
+        .entities
+        .retain(|entity| !remove_ids.contains(&entity.id));
 }
 
 fn normalize_instance_world_reference(entity: &mut SphereEntity) {
@@ -1102,8 +1223,9 @@ pub fn example_seed_world_snapshots() -> Vec<WorldSnapshot> {
 #[cfg(test)]
 mod tests {
     use super::{
-        example_world_snapshot, CommitOperation, CommitRequest, CommitTarget, SphereEntity,
-        TemporalWorldQuery, TimeWindow, WorldMutationFailure, WorldRepository, WorldSnapshot,
+        example_world_snapshot, world_repository_schema_version, CommitOperation, CommitRequest,
+        CommitTarget, PersistedWorldRepository, SphereEntity, TemporalWorldQuery, TimeWindow,
+        WorldMutationFailure, WorldRepository, WorldSnapshot,
     };
     use std::collections::BTreeMap;
 
@@ -1148,6 +1270,50 @@ mod tests {
                 end_tick: None,
             },
             tags: vec!["test".to_string()],
+        }
+    }
+
+    fn make_legacy_template_root_sphere(
+        id: &str,
+        parent_id: &str,
+        template_id: i32,
+    ) -> SphereEntity {
+        let mut dimensions = BTreeMap::new();
+        dimensions.insert("money".to_string(), 0.0);
+        dimensions.insert("world_template".to_string(), template_id as f32);
+        dimensions.insert("world_scale".to_string(), 1.0);
+
+        SphereEntity {
+            id: id.to_string(),
+            parent_id: Some(parent_id.to_string()),
+            radius: 12.0,
+            position_3d: [0.0, 0.0, 0.0],
+            dimensions,
+            instance_world_id: None,
+            time_window: TimeWindow {
+                start_tick: 0,
+                end_tick: None,
+            },
+            tags: vec![
+                "template-root".to_string(),
+                format!("template-{}", template_id),
+            ],
+        }
+    }
+
+    fn make_legacy_template_definition_sphere(id: &str, parent_id: &str) -> SphereEntity {
+        SphereEntity {
+            id: id.to_string(),
+            parent_id: Some(parent_id.to_string()),
+            radius: 1.0,
+            position_3d: [0.0, -1.0, 0.0],
+            dimensions: BTreeMap::new(),
+            instance_world_id: None,
+            time_window: TimeWindow {
+                start_tick: 0,
+                end_tick: None,
+            },
+            tags: vec!["template-definition".to_string()],
         }
     }
 
@@ -2134,6 +2300,83 @@ mod tests {
             .entities
             .iter()
             .any(|entity| entity.id == "sphere-user-branch-only-001"));
+    }
+
+    #[test]
+    fn from_persisted_state_migrates_v1_instance_reference_and_legacy_template_entities() {
+        let mut world = example_world_snapshot();
+        let world_instance = world
+            .entities
+            .iter_mut()
+            .find(|entity| entity.id == "sphere-world-instance-001")
+            .expect("world instance should exist");
+        world_instance.instance_world_id = None;
+        world_instance
+            .dimensions
+            .insert("world_template".to_string(), 2.0);
+        world_instance
+            .dimensions
+            .insert("world_scale".to_string(), 0.75);
+
+        let legacy_template_root = make_legacy_template_root_sphere(
+            "sphere-legacy-template-root-002",
+            "sphere-world-001",
+            2,
+        );
+        let legacy_template_definition = make_legacy_template_definition_sphere(
+            "sphere-legacy-template-root-002::child-001",
+            &legacy_template_root.id,
+        );
+        world.entities.push(legacy_template_root);
+        world.entities.push(legacy_template_definition);
+
+        let persisted = PersistedWorldRepository {
+            schema_version: 1,
+            masters: vec![world],
+            user_worlds: Vec::new(),
+            commit_seq: 9,
+        };
+
+        let restored = WorldRepository::from_persisted_state(persisted)
+            .expect("v1 persisted state should be migrated");
+        let snapshot = restored
+            .get_world_snapshot("world-main", None)
+            .expect("world snapshot should load");
+        let migrated_instance = snapshot
+            .entities
+            .iter()
+            .find(|entity| entity.id == "sphere-world-instance-001")
+            .expect("migrated world instance should exist");
+        assert_eq!(
+            migrated_instance.instance_world_id.as_deref(),
+            Some("world-template-2")
+        );
+        assert!(!migrated_instance.dimensions.contains_key("world_template"));
+        assert!(!migrated_instance.dimensions.contains_key("world_scale"));
+        assert!(!snapshot
+            .entities
+            .iter()
+            .any(|entity| entity.id == "sphere-legacy-template-root-002"));
+        assert!(!snapshot
+            .entities
+            .iter()
+            .any(|entity| entity.id == "sphere-legacy-template-root-002::child-001"));
+
+        let persisted_after_migration = restored.to_persisted_state();
+        assert_eq!(
+            persisted_after_migration.schema_version,
+            world_repository_schema_version()
+        );
+    }
+
+    #[test]
+    fn from_persisted_state_rejects_future_schema_version() {
+        let mut persisted = WorldRepository::new(example_world_snapshot()).to_persisted_state();
+        persisted.schema_version = world_repository_schema_version().saturating_add(1);
+
+        let error = WorldRepository::from_persisted_state(persisted)
+            .expect_err("future schema versions should be rejected");
+        assert!(error.contains("unsupported future datastore schema version"));
     }
 
     #[test]

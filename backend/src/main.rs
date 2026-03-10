@@ -20,9 +20,9 @@ use multiplayer::{
     MultiplayerWorldContext, PlayerInputEnqueueResult, ServerMultiplayerMessage,
 };
 use protocol::{
-    example_seed_world_snapshots, CommitFailure, CommitOperation, CommitRequest, CommitResponse,
-    CommitTarget, SphereEntity, TemporalWorldQuery, WorldMutationFailure, WorldRepository,
-    WorldSnapshot,
+    example_seed_world_snapshots, world_repository_schema_version, CommitFailure, CommitOperation,
+    CommitRequest, CommitResponse, CommitTarget, SphereEntity, TemporalWorldQuery,
+    WorldMutationFailure, WorldRepository, WorldSnapshot,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -466,20 +466,66 @@ async fn load_repository(
     seed_worlds: &[WorldSnapshot],
 ) -> WorldRepository {
     match datastore.load().await {
-        Ok(Some(state)) => match WorldRepository::from_persisted_state(state) {
-            Ok(repository) => {
-                tracing::info!("loaded world datastore from {}", datastore.path().display());
-                repository
+        Ok(Some(state)) => {
+            let loaded_schema_version = state.schema_version;
+            match WorldRepository::from_persisted_state(state) {
+                Ok(repository) => {
+                    let current_schema_version = world_repository_schema_version();
+                    if loaded_schema_version < current_schema_version {
+                        let backup_reason = format!(
+                            "migrate-v{}-to-v{}",
+                            loaded_schema_version, current_schema_version
+                        );
+                        match datastore.backup_existing(&backup_reason).await {
+                        Ok(Some(path)) => tracing::info!(
+                            "backed up datastore before schema migration: {}",
+                            path.display()
+                        ),
+                        Ok(None) => tracing::info!(
+                            "datastore migration requested but no existing datastore file was found for backup"
+                        ),
+                        Err(error) => {
+                            tracing::warn!(
+                                "failed to back up datastore before schema migration ({}); skipping automatic rewrite",
+                                error
+                            );
+                            tracing::info!(
+                                "loaded world datastore from {}",
+                                datastore.path().display()
+                            );
+                            return repository;
+                        }
+                    }
+
+                        let migrated_state = repository.to_persisted_state();
+                        match datastore.save(&migrated_state).await {
+                        Ok(_) => tracing::info!(
+                            "rewrote datastore at {} after schema migration to v{}",
+                            datastore.path().display(),
+                            current_schema_version
+                        ),
+                        Err(error) => tracing::warn!(
+                            "loaded datastore schema v{} and migrated in-memory, but failed to rewrite datastore ({}): {}",
+                            loaded_schema_version,
+                            datastore.path().display(),
+                            error
+                        ),
+                    }
+                    }
+
+                    tracing::info!("loaded world datastore from {}", datastore.path().display());
+                    repository
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        "invalid persisted datastore state ({}); using seed snapshot",
+                        error
+                    );
+                    WorldRepository::new_with_worlds(seed_worlds.to_vec())
+                        .expect("seed worlds must be valid")
+                }
             }
-            Err(error) => {
-                tracing::warn!(
-                    "invalid persisted datastore state ({}); using seed snapshot",
-                    error
-                );
-                WorldRepository::new_with_worlds(seed_worlds.to_vec())
-                    .expect("seed worlds must be valid")
-            }
-        },
+        }
         Ok(None) => {
             tracing::info!(
                 "no datastore file found at {}; using seed snapshot",
@@ -1250,9 +1296,11 @@ async fn send_world_entity_snapshot_for_session(
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_context_entities, should_deliver_master_world_commit_for_context,
-        should_deliver_world_commit_for_session, visible_to_others_from_mode,
+        collect_context_entities, filter_context_entities_for_observer,
+        should_deliver_master_world_commit_for_context, should_deliver_world_commit_for_session,
+        visible_to_others_from_mode,
     };
+    use crate::aoi::AoiPolicy;
     use crate::multiplayer::MultiplayerWorldContext;
     use crate::protocol::{CommitTarget, SphereEntity, TimeWindow, WorldSnapshot};
     use std::collections::BTreeMap;
@@ -1263,6 +1311,22 @@ mod tests {
             parent_id: parent_id.map(|value| value.to_string()),
             radius: 1.0,
             position_3d: [0.0, 0.0, 0.0],
+            dimensions: BTreeMap::new(),
+            instance_world_id: None,
+            time_window: TimeWindow {
+                start_tick: 0,
+                end_tick: None,
+            },
+            tags: Vec::new(),
+        }
+    }
+
+    fn make_positioned_entity(id: String, position_3d: [f32; 3]) -> SphereEntity {
+        SphereEntity {
+            id,
+            parent_id: Some("root".to_string()),
+            radius: 1.0,
+            position_3d,
             dimensions: BTreeMap::new(),
             instance_world_id: None,
             time_window: TimeWindow {
@@ -1343,6 +1407,62 @@ mod tests {
 
         let filtered = collect_context_entities(&world, Some(&context));
         assert!(filtered.is_empty());
+    }
+
+    #[test]
+    fn filter_context_entities_for_observer_caps_results_and_is_deterministic() {
+        let policy = AoiPolicy::default();
+        let entities = (0..120)
+            .map(|index| {
+                make_positioned_entity(
+                    format!("entity-{:03}", index),
+                    [index as f32 * 0.1, 0.0, 0.0],
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let (first, first_stats) =
+            filter_context_entities_for_observer(&entities, [0.0, 0.0, 0.0], policy);
+        let (second, second_stats) =
+            filter_context_entities_for_observer(&entities, [0.0, 0.0, 0.0], policy);
+
+        let first_ids = first
+            .iter()
+            .map(|entity| entity.id.clone())
+            .collect::<Vec<_>>();
+        let second_ids = second
+            .iter()
+            .map(|entity| entity.id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(first_ids, second_ids);
+        assert_eq!(first.len(), policy.max_world_entities);
+        assert_eq!(first_stats.returned_count, policy.max_world_entities);
+        assert_eq!(second_stats.returned_count, policy.max_world_entities);
+        assert!(first_stats.candidate_count >= policy.max_world_entities);
+        assert!(second_stats.candidate_count >= policy.max_world_entities);
+    }
+
+    #[test]
+    fn filter_context_entities_for_observer_excludes_out_of_radius_entities() {
+        let policy = AoiPolicy::default();
+        let entities = vec![
+            make_positioned_entity("near".to_string(), [12.0, 0.0, 0.0]),
+            make_positioned_entity("edge".to_string(), [36.0, 0.0, 0.0]),
+            make_positioned_entity("far".to_string(), [96.0, 0.0, 0.0]),
+        ];
+
+        let (filtered, stats) =
+            filter_context_entities_for_observer(&entities, [0.0, 0.0, 0.0], policy);
+        let ids = filtered
+            .iter()
+            .map(|entity| entity.id.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(stats.context_entity_count, 3);
+        assert_eq!(stats.returned_count, 2);
+        assert!(ids.iter().any(|id| id == "near"));
+        assert!(ids.iter().any(|id| id == "edge"));
+        assert!(!ids.iter().any(|id| id == "far"));
     }
 
     #[test]

@@ -1848,6 +1848,60 @@ mod tests {
         assert!(delta.removed_player_ids.is_empty());
     }
 
+    fn make_player_snapshot(id: &str, position_x: f32) -> MultiplayerPlayerSnapshot {
+        MultiplayerPlayerSnapshot {
+            player_id: id.to_string(),
+            position_3d: [position_x, 0.0, 0.0],
+            yaw: 0.0,
+            pitch: 0.0,
+            avatar_id: "duck".to_string(),
+            last_processed_input_tick: 1,
+        }
+    }
+
+    #[test]
+    fn build_snapshot_delta_payload_is_smaller_than_full_snapshot_for_sparse_changes() {
+        let baseline_players = (0..48)
+            .map(|index| {
+                make_player_snapshot(format!("player-{:03}", index).as_str(), index as f32)
+            })
+            .collect::<Vec<_>>();
+        let mut next_players = baseline_players.clone();
+        next_players[0].position_3d = [2.0, 0.0, 0.0];
+
+        let baseline_by_id = snapshot_players_by_id(&baseline_players);
+        let delta = build_snapshot_delta("world-main", 200, &next_players, 199, &baseline_by_id);
+        assert_eq!(delta.upsert_players.len(), 1);
+        assert_eq!(delta.removed_player_ids.len(), 0);
+
+        let full_message = ServerMultiplayerMessage::StateSnapshot {
+            world_id: "world-main".to_string(),
+            server_tick: 200,
+            players: next_players,
+        };
+        let delta_message = ServerMultiplayerMessage::StateSnapshotDelta {
+            world_id: delta.world_id,
+            server_tick: delta.server_tick,
+            baseline_server_tick: delta.baseline_server_tick,
+            upsert_players: delta.upsert_players,
+            removed_player_ids: delta.removed_player_ids,
+        };
+
+        let full_payload_bytes = serde_json::to_vec(&full_message)
+            .expect("serialize full state snapshot")
+            .len();
+        let delta_payload_bytes = serde_json::to_vec(&delta_message)
+            .expect("serialize delta snapshot")
+            .len();
+
+        assert!(
+            delta_payload_bytes < full_payload_bytes,
+            "delta payload should be smaller than full snapshot (delta={} full={})",
+            delta_payload_bytes,
+            full_payload_bytes
+        );
+    }
+
     fn make_world_entity(id: &str, position_3d: [f32; 3], radius: f32) -> SphereEntity {
         SphereEntity {
             id: id.to_string(),
@@ -1904,5 +1958,59 @@ mod tests {
 
         assert!(delta.upsert_entities.is_empty());
         assert!(delta.removed_entity_ids.is_empty());
+    }
+
+    #[test]
+    fn build_world_entity_delta_payload_is_smaller_than_full_snapshot_for_sparse_changes() {
+        let baseline_entities = (0..72)
+            .map(|index| {
+                make_world_entity(
+                    format!("entity-{:03}", index).as_str(),
+                    [index as f32 * 0.5, 0.0, 0.0],
+                    1.0,
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut next_entities = baseline_entities.clone();
+        next_entities[0].position_3d = [1.25, 0.0, 0.0];
+        next_entities.pop();
+
+        let baseline_by_id = world_entities_by_id(&baseline_entities);
+        let delta = build_world_entity_snapshot_delta(
+            "world-main",
+            300,
+            &next_entities,
+            299,
+            &baseline_by_id,
+        );
+        assert_eq!(delta.upsert_entities.len(), 1);
+        assert_eq!(delta.removed_entity_ids.len(), 1);
+
+        let full_message = ServerMultiplayerMessage::WorldEntitySnapshot {
+            world_id: "world-main".to_string(),
+            server_tick: 300,
+            entities: next_entities,
+        };
+        let delta_message = ServerMultiplayerMessage::WorldEntitySnapshotDelta {
+            world_id: delta.world_id,
+            server_tick: delta.server_tick,
+            baseline_server_tick: delta.baseline_server_tick,
+            upsert_entities: delta.upsert_entities,
+            removed_entity_ids: delta.removed_entity_ids,
+        };
+
+        let full_payload_bytes = serde_json::to_vec(&full_message)
+            .expect("serialize full world-entity snapshot")
+            .len();
+        let delta_payload_bytes = serde_json::to_vec(&delta_message)
+            .expect("serialize world-entity delta snapshot")
+            .len();
+
+        assert!(
+            delta_payload_bytes < full_payload_bytes,
+            "world-entity delta payload should be smaller than full snapshot (delta={} full={})",
+            delta_payload_bytes,
+            full_payload_bytes
+        );
     }
 }

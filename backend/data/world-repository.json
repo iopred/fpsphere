@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "masters": [
     {
       "world_id": "world-main",
@@ -62,8 +62,6 @@
             "money": 0.35,
             "r": 0.9255,
             "world_pitch": 0.055,
-            "world_scale": 1.0,
-            "world_template": 1.0,
             "world_yaw": 0.8635
           },
           "instance_world_id": "world-template-1",
@@ -90,8 +88,6 @@
             "money": 0.04724994,
             "r": 0.18782078,
             "world_pitch": -0.4579,
-            "world_scale": 1.0,
-            "world_template": 1.0,
             "world_yaw": 2.6015
           },
           "instance_world_id": "world-template-1",
@@ -119,8 +115,6 @@
             "money": 0.48320514,
             "r": 0.18782078,
             "world_pitch": -0.0495,
-            "world_scale": 1.0,
-            "world_template": 1.0,
             "world_yaw": -2.651
           },
           "instance_world_id": "world-template-1",
@@ -146,9 +140,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.73981273,
-            "r": 0.18782078,
-            "world_scale": 1.0,
-            "world_template": 1.0
+            "r": 0.18782078
           },
           "instance_world_id": "world-template-1",
           "time_window": {
@@ -175,8 +167,6 @@
             "money": 0.23071118,
             "r": 0.18782078,
             "world_pitch": 0.1155,
-            "world_scale": 1.0,
-            "world_template": 1.0,
             "world_yaw": -1.056
           },
           "instance_world_id": "world-template-1",
@@ -204,8 +194,6 @@
             "money": 0.2561053,
             "r": 0.4039,
             "world_pitch": 0.2255,
-            "world_scale": 1.0,
-            "world_template": 1.0,
             "world_yaw": -1.969
           },
           "instance_world_id": "world-template-1",
@@ -231,9 +219,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.22699042,
-            "r": 0.18782078,
-            "world_scale": 1.0,
-            "world_template": 2.0
+            "r": 0.18782078
           },
           "instance_world_id": "world-template-2",
           "time_window": {
@@ -258,9 +244,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.70160717,
-            "r": 0.18782078,
-            "world_scale": 1.0,
-            "world_template": 2.0
+            "r": 0.18782078
           },
           "instance_world_id": "world-template-2",
           "time_window": {
@@ -285,9 +269,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.07104218,
-            "r": 0.18782078,
-            "world_scale": 1.0,
-            "world_template": 2.0
+            "r": 0.18782078
           },
           "instance_world_id": "world-template-2",
           "time_window": {
@@ -312,9 +294,7 @@
             "b": 0.5686,
             "g": 0.0941,
             "money": 0.5759176,
-            "r": 0.5608,
-            "world_scale": 1.0,
-            "world_template": 2.0
+            "r": 0.5608
           },
           "instance_world_id": "world-template-2",
           "time_window": {
@@ -339,9 +319,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.38813978,
-            "r": 0.18782078,
-            "world_scale": 1.0,
-            "world_template": 2.0
+            "r": 0.18782078
           },
           "instance_world_id": "world-template-2",
           "time_window": {
@@ -366,8 +344,7 @@
             "b": 0.1647,
             "g": 0.1647,
             "money": 0.686128,
-            "r": 0.4745,
-            "world_template": 0.0
+            "r": 0.4745
           },
           "instance_world_id": null,
           "time_window": {
@@ -391,9 +368,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.36929017,
-            "r": 0.18782078,
-            "world_scale": 1.0,
-            "world_template": 1.0
+            "r": 0.18782078
           },
           "instance_world_id": "world-template-1",
           "time_window": {
@@ -420,8 +395,6 @@
             "money": 0.3505829,
             "r": 0.18782078,
             "world_pitch": -0.154,
-            "world_scale": 1.0,
-            "world_template": 2.0,
             "world_yaw": -3.751
           },
           "instance_world_id": "world-template-2",
@@ -447,9 +420,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.4366159,
-            "r": 0.18782078,
-            "world_scale": 1.0,
-            "world_template": 2.0
+            "r": 0.18782078
           },
           "instance_world_id": "world-template-2",
           "time_window": {
@@ -474,9 +445,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.3086309,
-            "r": 0.18782078,
-            "world_scale": 1.0,
-            "world_template": 1.0
+            "r": 0.18782078
           },
           "instance_world_id": "world-template-1",
           "time_window": {
@@ -501,9 +470,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.99367267,
-            "r": 0.18782078,
-            "world_scale": 1.0,
-            "world_template": 1.0
+            "r": 0.18782078
           },
           "instance_world_id": "world-template-1",
           "time_window": {
@@ -530,8 +497,6 @@
             "money": 0.017897403,
             "r": 0.18782078,
             "world_pitch": -0.0385,
-            "world_scale": 1.0,
-            "world_template": 1.0,
             "world_yaw": 1.43
           },
           "instance_world_id": "world-template-1",
@@ -606,8 +571,7 @@
             "b": 0.502,
             "g": 0.502,
             "money": 0.7,
-            "r": 0.502,
-            "world_template": 2.0
+            "r": 0.502
           },
           "instance_world_id": "world-template-2",
           "time_window": {
@@ -631,8 +595,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.9556372,
-            "r": 0.18782078,
-            "world_template": 0.0
+            "r": 0.18782078
           },
           "instance_world_id": null,
           "time_window": {
@@ -656,8 +619,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.31813702,
-            "r": 0.18782078,
-            "world_template": 0.0
+            "r": 0.18782078
           },
           "instance_world_id": null,
           "time_window": {
@@ -681,8 +643,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.13689305,
-            "r": 0.18782078,
-            "world_template": 0.0
+            "r": 0.18782078
           },
           "instance_world_id": null,
           "time_window": {
@@ -706,8 +667,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.75922346,
-            "r": 0.18782078,
-            "world_template": 0.0
+            "r": 0.18782078
           },
           "instance_world_id": null,
           "time_window": {
@@ -731,8 +691,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.4565318,
-            "r": 0.18782078,
-            "world_template": 0.0
+            "r": 0.18782078
           },
           "instance_world_id": null,
           "time_window": {
@@ -756,8 +715,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.17458023,
-            "r": 0.18782078,
-            "world_template": 0.0
+            "r": 0.18782078
           },
           "instance_world_id": null,
           "time_window": {
@@ -781,8 +739,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.52942264,
-            "r": 0.18782078,
-            "world_template": 0.0
+            "r": 0.18782078
           },
           "instance_world_id": null,
           "time_window": {
@@ -806,8 +763,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.12535375,
-            "r": 0.18782078,
-            "world_template": 0.0
+            "r": 0.18782078
           },
           "instance_world_id": null,
           "time_window": {
@@ -831,8 +787,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.40904677,
-            "r": 0.18782078,
-            "world_template": 0.0
+            "r": 0.18782078
           },
           "instance_world_id": null,
           "time_window": {
@@ -856,8 +811,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.9160563,
-            "r": 0.18782078,
-            "world_template": 0.0
+            "r": 0.18782078
           },
           "instance_world_id": null,
           "time_window": {
@@ -881,8 +835,7 @@
             "b": 0.3277781,
             "g": 0.23074006,
             "money": 0.75684834,
-            "r": 0.18782078,
-            "world_template": 0.0
+            "r": 0.18782078
           },
           "instance_world_id": null,
           "time_window": {
@@ -897,7 +850,7 @@
     },
     {
       "world_id": "world-template-2",
-      "tick": 12,
+      "tick": 13,
       "entities": [
         {
           "id": "sphere-world-001",
@@ -954,8 +907,7 @@
             "b": 0.3647,
             "g": 0.6078,
             "money": 0.56601316,
-            "r": 0.9765,
-            "world_template": 0.0
+            "r": 0.9765
           },
           "instance_world_id": null,
           "time_window": {
@@ -979,8 +931,7 @@
             "b": 0.3647,
             "g": 0.6078,
             "money": 0.08801749,
-            "r": 0.9765,
-            "world_template": 0.0
+            "r": 0.9765
           },
           "instance_world_id": null,
           "time_window": {
@@ -1004,8 +955,7 @@
             "b": 0.3647,
             "g": 0.6078,
             "money": 0.6979577,
-            "r": 0.9765,
-            "world_template": 0.0
+            "r": 0.9765
           },
           "instance_world_id": null,
           "time_window": {
@@ -1029,8 +979,7 @@
             "b": 0.3647,
             "g": 0.6078,
             "money": 0.7805091,
-            "r": 0.9765,
-            "world_template": 0.0
+            "r": 0.9765
           },
           "instance_world_id": null,
           "time_window": {
@@ -1054,8 +1003,7 @@
             "b": 0.3647,
             "g": 0.6078,
             "money": 0.9346755,
-            "r": 0.9765,
-            "world_template": 0.0
+            "r": 0.9765
           },
           "instance_world_id": null,
           "time_window": {
@@ -1079,8 +1027,7 @@
             "b": 1.0,
             "g": 1.0,
             "money": 0.06095674,
-            "r": 1.0,
-            "world_template": 0.0
+            "r": 1.0
           },
           "instance_world_id": null,
           "time_window": {
@@ -1104,8 +1051,7 @@
             "b": 1.0,
             "g": 1.0,
             "money": 0.57925725,
-            "r": 1.0,
-            "world_template": 0.0
+            "r": 1.0
           },
           "instance_world_id": null,
           "time_window": {
@@ -1129,8 +1075,7 @@
             "b": 0.1961,
             "g": 0.5255,
             "money": 0.9975281,
-            "r": 0.2706,
-            "world_template": 0.0
+            "r": 0.2706
           },
           "instance_world_id": null,
           "time_window": {
@@ -1154,8 +1099,7 @@
             "b": 0.1961,
             "g": 0.5255,
             "money": 0.5626875,
-            "r": 0.2706,
-            "world_template": 0.0
+            "r": 0.2706
           },
           "instance_world_id": null,
           "time_window": {
@@ -1171,20 +1115,67 @@
           "parent_id": "sphere-world-001",
           "radius": 2.4,
           "position_3d": [
-            0.9387295,
-            -5.292839,
-            3.377589
+            1.253,
+            -6.572,
+            5.561
           ],
           "dimensions": {
-            "b": 0.3277781,
-            "g": 0.23074006,
+            "b": 0.4784,
+            "g": 0.7529,
             "money": 0.7889309,
-            "r": 0.18782078,
-            "world_template": 0.0
+            "r": 0.5569
           },
           "instance_world_id": null,
           "time_window": {
             "start_tick": 1193,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created"
+          ]
+        },
+        {
+          "id": "sphere-user-94cd0f07-afd-0001",
+          "parent_id": "sphere-world-001",
+          "radius": 2.207,
+          "position_3d": [
+            -1.542,
+            -5.586,
+            0.582
+          ],
+          "dimensions": {
+            "b": 0.6078,
+            "g": 0.7529,
+            "money": 0.54892457,
+            "r": 0.5569
+          },
+          "instance_world_id": null,
+          "time_window": {
+            "start_tick": 1199,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created"
+          ]
+        },
+        {
+          "id": "sphere-user-94cd0f07-afd-0002",
+          "parent_id": "sphere-world-001",
+          "radius": 2.402,
+          "position_3d": [
+            1.661,
+            -5.328,
+            -0.503
+          ],
+          "dimensions": {
+            "b": 0.4784,
+            "g": 0.7529,
+            "money": 0.7984941,
+            "r": 0.5569
+          },
+          "instance_world_id": null,
+          "time_window": {
+            "start_tick": 2609,
             "end_tick": null
           },
           "tags": [
@@ -1195,5 +1186,5 @@
     }
   ],
   "user_worlds": [],
-  "commit_seq": 31
+  "commit_seq": 32
 }

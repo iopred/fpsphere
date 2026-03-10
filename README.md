@@ -34,21 +34,21 @@ Current implementation includes:
 6. Multiplayer:
    - Frontend opens a WebSocket connection to `/ws` (proxied to backend).
    - Open multiple browser tabs/windows to see remote players.
-7. Subworld instancing:
-   - Spheres with `dimensions.world_template` are expanded client-side into scaled sub-spheres.
-   - Editor-created spheres default to `world_template = 0` (no template instancing).
-8. Template selector HUD:
-   - Top-right HUD lets you pick the template id used by `C` create in editor mode.
-   - The same HUD can change `world_template` on the currently selected sphere.
+7. World instancing:
+   - Spheres with `instanceWorldId` / backend `instance_world_id` are expanded client-side into nested world content.
+   - Editor-created spheres can be assigned a target world id from the HUD.
+8. World instance HUD:
+   - Top-right HUD lets you pick the world id used by `C` create in editor mode.
+   - The same HUD can change the selected sphere `instanceWorldId`.
 9. Level manager HUD:
    - In editor mode, use the Level Select panel to switch levels.
    - Use `Add` to create a new level and `Remove` to delete an existing level.
 10. Editor transform controls:
    - Mouse wheel resizes the selected sphere radius (pixel-normalized for trackpads).
    - Hold right mouse button to drag the selected sphere along your view direction.
-   - Hold `R` and move mouse to rotate template hosts (`yaw`/`pitch`).
+   - Hold `R` and move mouse to rotate world-instance hosts (`yaw`/`pitch`).
 11. Sphere world navigation:
-   - `F` in editor mode enters the template world of the selected sphere (`world_template > 0`).
+   - `F` in editor mode enters the selected sphere instance world (`instanceWorldId`).
    - `F` with no selected sphere exits back to the parent world.
 12. QR marker printer:
    - Open `http://localhost:5173/?mode=qr`.
@@ -96,6 +96,8 @@ Current implementation includes:
    - Backend loads/saves world state as JSON.
    - Default path: `backend/data/world-repository.json`.
    - Override path with `WORLD_DATASTORE_PATH=/absolute/or/relative/path.json`.
+   - Startup migrates older datastore schema versions in place (currently v1 -> v2), creating a timestamped backup before rewrite.
+   - Datastore saves use temp-file + atomic rename.
 
 ## Docker deployment
 
@@ -175,8 +177,8 @@ From repo root:
   - New Avatar Editor app mode (`?mode=avatar`) supports live layout tuning and persisted per-avatar overrides.
 - Additional shipped features:
   - Level management (list/create/delete/switch worlds from editor HUD).
-  - Template-driven subworld instancing (`world_template`, `world_scale`) with shared template roots.
-  - Legacy template descendant compaction in backend snapshots/commits.
+  - Explicit world-instance rendering via `instance_world_id`/`instanceWorldId`.
+  - Legacy template instancing/compaction paths removed from runtime behavior.
   - QR marker print mode and mobile AR marker viewer mode.
   - Simplified payloads:
     - commit success responses now include `commit_id`, `saved_to`, `reason`, and `world`.
@@ -203,10 +205,10 @@ From repo root:
   - Delta multiplayer snapshots:
     - server tracks per-connection snapshot baselines and emits `state_snapshot_delta` messages between periodic full snapshots.
     - client reconstructs authoritative full snapshots from deltas, with automatic fallback to next full baseline on mismatch.
-  - Template-focused stream suppression:
-    - FPS client now publishes `focus_sphere_id` during template edit context (shared template root).
-    - player snapshots are now partitioned by focus context, so template editors no longer leak position updates into main world streams.
-    - master world commit broadcasts are delivered only to sessions in the same focus context.
+  - World-context stream suppression:
+    - FPS/AR clients publish `world_context` during nested world editing.
+    - player/world-entity snapshots are partitioned by world context so nested editors do not leak updates into unrelated contexts.
+    - master world commit broadcasts are delivered only to sessions in the same world context.
   - Backend delete semantics now reject deleting non-leaf spheres (prevents orphaned parent references).
   - Sprint 1 closeout artifact with acceptance evidence: [docs/sprint-1-closeout.md](docs/sprint-1-closeout.md).
   - Sprint 2 closeout artifact with authoritative movement acceptance evidence: [docs/sprint-2-closeout.md](docs/sprint-2-closeout.md).

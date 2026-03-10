@@ -313,3 +313,14 @@ Delivery semantics:
 - Frontend and backend use equivalent sphere entity fields.
 - Naming differences are currently language-style only (`camelCase` in TS, `snake_case` in Rust JSON).
 - Next step: unify through generated schema artifacts.
+
+## Datastore schema/versioning
+
+- Persisted world repository schema version is currently `2`.
+- Backend supports loading schema `1` and migrates it to `2` on startup.
+- v1 -> v2 migration behavior:
+  - derive explicit `instance_world_id` from legacy `world_template` dimension when missing.
+  - remove legacy `world_template` / `world_scale` dimensions.
+  - remove legacy `template-root` / `template-definition` entities and descendants.
+- Before writing migrated state back to disk, backend creates a timestamped backup of the previous datastore file.
+- Datastore writes use a temp-file + atomic rename strategy.
