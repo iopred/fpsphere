@@ -308,6 +308,8 @@ Delivery semantics:
 - `world_entity_snapshot`/delta streams are filtered per observer by:
   - world context partition first (active context subtree),
   - then hierarchical spatial hash grid AOI selection (`AoiDomain::WorldEntities` policy).
+  - full `instance_path` chain validation is applied; invalid/mismatched context paths fail closed.
+  - legacy `template-root` fallback filtering is not used for world-entity AOI scoping.
 - `saved_to = master`: delivered only when session `world_context` matches commit `world_context`.
 - `saved_to = user`: delivered only to connections for that same `user_id` and `world_id`.
 

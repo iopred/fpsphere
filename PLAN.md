@@ -542,6 +542,10 @@ Epic tracking:
   - implementation direction: hierarchical spatial hash grid (HSHG), not octree.
   - partition order: `world_context` isolation first, then spatial query within context.
   - deterministic output contract preserved (distance + stable id tie-break).
+  - tightened context-subtree rules:
+    - validate full `instance_path` parent-child chain before subtree scoping.
+    - mismatched/invalid context paths fail closed for world-entity stream payloads.
+    - legacy `template-root` fallback exclusion removed from AOI scope selection.
 - [x] `S6-C3` Ensure template/world editing isolation:
   - editors in nested world contexts do not receive unrelated outer-world entity updates.
 - [ ] `S6-C4` Add AOI world-entity metrics instrumentation and trend reporting (non-blocking for Sprint 6 signoff).

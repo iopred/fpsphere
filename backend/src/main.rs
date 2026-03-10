@@ -166,8 +166,53 @@ fn should_deliver_world_commit_for_session(
     }
 }
 
-fn world_context_focus_sphere_id(world_context: Option<&MultiplayerWorldContext>) -> Option<&str> {
-    world_context?.instance_path.last().map(String::as_str)
+enum WorldContextEntityScope {
+    FullWorld,
+    Subtree { root_entity_id: String },
+    Invalid,
+}
+
+fn resolve_world_context_entity_scope(
+    world: &WorldSnapshot,
+    world_context: Option<&MultiplayerWorldContext>,
+    entities_by_id: &HashMap<String, &SphereEntity>,
+) -> WorldContextEntityScope {
+    let Some(context) = world_context else {
+        return WorldContextEntityScope::FullWorld;
+    };
+
+    if context.root_world_id.trim() != world.world_id {
+        return WorldContextEntityScope::Invalid;
+    }
+    if context.instance_path.is_empty() {
+        return WorldContextEntityScope::FullWorld;
+    }
+
+    let mut previous_id: Option<&str> = None;
+    let mut last_id: Option<String> = None;
+    for segment in &context.instance_path {
+        let segment_id = segment.trim();
+        if segment_id.is_empty() {
+            return WorldContextEntityScope::Invalid;
+        }
+
+        let Some(entity) = entities_by_id.get(segment_id) else {
+            return WorldContextEntityScope::Invalid;
+        };
+        if let Some(previous_segment_id) = previous_id {
+            if entity.parent_id.as_deref() != Some(previous_segment_id) {
+                return WorldContextEntityScope::Invalid;
+            }
+        }
+
+        previous_id = Some(segment_id);
+        last_id = Some(segment_id.to_string());
+    }
+
+    match last_id {
+        Some(root_entity_id) => WorldContextEntityScope::Subtree { root_entity_id },
+        None => WorldContextEntityScope::FullWorld,
+    }
 }
 
 fn collect_context_entities(
@@ -187,11 +232,16 @@ fn collect_context_entities(
         }
     }
 
-    if let Some(focus_sphere_id) = world_context_focus_sphere_id(world_context) {
-        let focus_id = focus_sphere_id.trim();
-        if let Some(focus_entity) = entities_by_id.get(focus_id) {
+    match resolve_world_context_entity_scope(world, world_context, &entities_by_id) {
+        WorldContextEntityScope::FullWorld => {
+            let mut all_entities = world.entities.clone();
+            all_entities.sort_by(|left, right| left.id.cmp(&right.id));
+            all_entities
+        }
+        WorldContextEntityScope::Invalid => Vec::new(),
+        WorldContextEntityScope::Subtree { root_entity_id } => {
             let mut included_ids = HashSet::<String>::new();
-            let mut stack = vec![focus_entity.id.clone()];
+            let mut stack = vec![root_entity_id];
             while let Some(current_id) = stack.pop() {
                 if !included_ids.insert(current_id.clone()) {
                     continue;
@@ -208,44 +258,9 @@ fn collect_context_entities(
                 .cloned()
                 .collect::<Vec<_>>();
             filtered.sort_by(|left, right| left.id.cmp(&right.id));
-            return filtered;
+            filtered
         }
     }
-
-    let template_root_ids = world
-        .entities
-        .iter()
-        .filter(|entity| entity.tags.iter().any(|tag| tag == "template-root"))
-        .map(|entity| entity.id.clone())
-        .collect::<HashSet<_>>();
-    if template_root_ids.is_empty() {
-        let mut all_entities = world.entities.clone();
-        all_entities.sort_by(|left, right| left.id.cmp(&right.id));
-        return all_entities;
-    }
-
-    let mut filtered = Vec::<SphereEntity>::new();
-    'entity: for entity in &world.entities {
-        if template_root_ids.contains(entity.id.as_str()) {
-            continue;
-        }
-
-        let mut cursor_parent_id = entity.parent_id.clone();
-        while let Some(parent_id) = cursor_parent_id {
-            if template_root_ids.contains(parent_id.as_str()) {
-                continue 'entity;
-            }
-
-            cursor_parent_id = entities_by_id
-                .get(parent_id.as_str())
-                .and_then(|parent| parent.parent_id.clone());
-        }
-
-        filtered.push(entity.clone());
-    }
-
-    filtered.sort_by(|left, right| left.id.cmp(&right.id));
-    filtered
 }
 
 fn filter_context_entities_for_observer(
@@ -1108,11 +1123,100 @@ async fn send_world_entity_snapshot_for_session(
 #[cfg(test)]
 mod tests {
     use super::{
-        should_deliver_master_world_commit_for_context, should_deliver_world_commit_for_session,
-        visible_to_others_from_mode,
+        collect_context_entities, should_deliver_master_world_commit_for_context,
+        should_deliver_world_commit_for_session, visible_to_others_from_mode,
     };
     use crate::multiplayer::MultiplayerWorldContext;
-    use crate::protocol::CommitTarget;
+    use crate::protocol::{CommitTarget, SphereEntity, TimeWindow, WorldSnapshot};
+    use std::collections::BTreeMap;
+
+    fn make_entity(id: &str, parent_id: Option<&str>) -> SphereEntity {
+        SphereEntity {
+            id: id.to_string(),
+            parent_id: parent_id.map(|value| value.to_string()),
+            radius: 1.0,
+            position_3d: [0.0, 0.0, 0.0],
+            dimensions: BTreeMap::new(),
+            instance_world_id: None,
+            time_window: TimeWindow {
+                start_tick: 0,
+                end_tick: None,
+            },
+            tags: Vec::new(),
+        }
+    }
+
+    fn make_scope_test_world() -> WorldSnapshot {
+        WorldSnapshot {
+            world_id: "world-main".to_string(),
+            tick: 1,
+            entities: vec![
+                make_entity("root", None),
+                make_entity("branch-a", Some("root")),
+                make_entity("branch-b", Some("branch-a")),
+                make_entity("branch-c", Some("root")),
+            ],
+        }
+    }
+
+    #[test]
+    fn collect_context_entities_without_context_returns_full_world() {
+        let world = make_scope_test_world();
+        let filtered = collect_context_entities(&world, None);
+        let ids = filtered
+            .into_iter()
+            .map(|entity| entity.id)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            vec![
+                "branch-a".to_string(),
+                "branch-b".to_string(),
+                "branch-c".to_string(),
+                "root".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn collect_context_entities_with_valid_context_path_returns_subtree() {
+        let world = make_scope_test_world();
+        let context = MultiplayerWorldContext {
+            root_world_id: "world-main".to_string(),
+            instance_path: vec!["branch-a".to_string()],
+        };
+
+        let filtered = collect_context_entities(&world, Some(&context));
+        let ids = filtered
+            .into_iter()
+            .map(|entity| entity.id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["branch-a".to_string(), "branch-b".to_string(),]);
+    }
+
+    #[test]
+    fn collect_context_entities_with_invalid_path_fails_closed() {
+        let world = make_scope_test_world();
+        let context = MultiplayerWorldContext {
+            root_world_id: "world-main".to_string(),
+            instance_path: vec!["branch-b".to_string(), "branch-a".to_string()],
+        };
+
+        let filtered = collect_context_entities(&world, Some(&context));
+        assert!(filtered.is_empty());
+    }
+
+    #[test]
+    fn collect_context_entities_with_mismatched_root_world_fails_closed() {
+        let world = make_scope_test_world();
+        let context = MultiplayerWorldContext {
+            root_world_id: "world-template-2".to_string(),
+            instance_path: vec!["branch-a".to_string()],
+        };
+
+        let filtered = collect_context_entities(&world, Some(&context));
+        assert!(filtered.is_empty());
+    }
 
     #[test]
     fn master_world_commit_delivery_respects_focus_context() {

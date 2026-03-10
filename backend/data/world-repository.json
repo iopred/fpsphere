@@ -548,7 +548,7 @@
     },
     {
       "world_id": "world-template-1",
-      "tick": 4,
+      "tick": 5,
       "entities": [
         {
           "id": "sphere-template-world-001",
@@ -603,10 +603,10 @@
             2.218
           ],
           "dimensions": {
-            "b": 0.3608,
-            "g": 0.9412,
+            "b": 0.502,
+            "g": 0.502,
             "money": 0.7,
-            "r": 0.0,
+            "r": 0.502,
             "world_template": 2.0
           },
           "instance_world_id": "world-template-2",
@@ -897,7 +897,7 @@
     },
     {
       "world_id": "world-template-2",
-      "tick": 10,
+      "tick": 12,
       "entities": [
         {
           "id": "sphere-world-001",
@@ -1165,10 +1165,35 @@
           "tags": [
             "user-created"
           ]
+        },
+        {
+          "id": "sphere-user-05c5ac8c-e10-0004",
+          "parent_id": "sphere-world-001",
+          "radius": 2.4,
+          "position_3d": [
+            0.9387295,
+            -5.292839,
+            3.377589
+          ],
+          "dimensions": {
+            "b": 0.3277781,
+            "g": 0.23074006,
+            "money": 0.7889309,
+            "r": 0.18782078,
+            "world_template": 0.0
+          },
+          "instance_world_id": null,
+          "time_window": {
+            "start_tick": 1193,
+            "end_tick": null
+          },
+          "tags": [
+            "user-created"
+          ]
         }
       ]
     }
   ],
   "user_worlds": [],
-  "commit_seq": 28
+  "commit_seq": 31
 }
