@@ -1651,12 +1651,12 @@ mod tests {
         let mut focus_context_by_player_id = HashMap::<String, Option<String>>::new();
         focus_context_by_player_id.insert(
             "observer".to_string(),
-            Some("sphere-template-root-1".to_string()),
+            Some("sphere-world-instance-1".to_string()),
         );
         focus_context_by_player_id.insert("other".to_string(), None);
         focus_context_by_player_id.insert(
             "peer-focused".to_string(),
-            Some("sphere-template-root-1".to_string()),
+            Some("sphere-world-instance-1".to_string()),
         );
 
         let focused = filter_snapshot_players_for_focus_context(
@@ -1690,7 +1690,7 @@ mod tests {
             "world-main",
             Some(MultiplayerWorldContext {
                 root_world_id: "world-main".to_string(),
-                instance_path: vec!["sphere-template-root-1".to_string()],
+                instance_path: vec!["sphere-world-instance-1".to_string()],
             }),
         )
         .expect("normalized world context");
@@ -1698,7 +1698,7 @@ mod tests {
         assert_eq!(context.root_world_id, "world-main");
         assert_eq!(
             context.instance_path,
-            vec!["sphere-template-root-1".to_string()]
+            vec!["sphere-world-instance-1".to_string()]
         );
     }
 

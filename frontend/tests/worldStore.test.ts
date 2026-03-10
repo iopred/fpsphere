@@ -164,13 +164,13 @@ describe("LocalWorldStore", () => {
       type: "updateSphereDimensions",
       sphereId: targetId,
       dimensions: {
-        world_template: 1,
+        r: 0.3,
       },
     });
 
     expect(changed).toBe(true);
     const updated = store.getChildSphereById(targetId);
-    expect(updated?.dimensions.world_template).toBe(1);
+    expect(updated?.dimensions.r).toBe(0.3);
   });
 
   it("updates instance world reference on a selected sphere", () => {

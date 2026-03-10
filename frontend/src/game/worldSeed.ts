@@ -56,11 +56,7 @@ const seedPayload: unknown[] = [
     parentId: "sphere-world-001",
     radius: 12,
     position3d: [18, -2, 14],
-    dimensions: {
-      money: 0.35,
-      world_template: 1,
-      world_scale: 1,
-    },
+    dimensions: { money: 0.35 },
     instanceWorldId: "world-template-1",
     timeWindow: { start: 0, end: null },
     tags: ["world-instance"],

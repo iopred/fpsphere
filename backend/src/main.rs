@@ -1351,15 +1351,15 @@ mod tests {
 
         let context_a = MultiplayerWorldContext {
             root_world_id: "world-main".to_string(),
-            instance_path: vec!["sphere-template-root-1".to_string()],
+            instance_path: vec!["sphere-world-instance-1".to_string()],
         };
         let context_a_copy = MultiplayerWorldContext {
             root_world_id: "world-main".to_string(),
-            instance_path: vec!["sphere-template-root-1".to_string()],
+            instance_path: vec!["sphere-world-instance-1".to_string()],
         };
         let context_b = MultiplayerWorldContext {
             root_world_id: "world-main".to_string(),
-            instance_path: vec!["sphere-template-root-2".to_string()],
+            instance_path: vec!["sphere-world-instance-2".to_string()],
         };
         assert!(should_deliver_master_world_commit_for_context(
             Some(&context_a),
@@ -1405,11 +1405,11 @@ mod tests {
     fn world_commit_delivery_keeps_context_filter_for_same_world_master() {
         let session_context = MultiplayerWorldContext {
             root_world_id: "world-main".to_string(),
-            instance_path: vec!["sphere-template-root-1".to_string()],
+            instance_path: vec!["sphere-world-instance-1".to_string()],
         };
         let different_commit_context = MultiplayerWorldContext {
             root_world_id: "world-main".to_string(),
-            instance_path: vec!["sphere-template-root-2".to_string()],
+            instance_path: vec!["sphere-world-instance-2".to_string()],
         };
 
         assert!(!should_deliver_world_commit_for_session(

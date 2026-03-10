@@ -21,11 +21,11 @@ describe("worldInstanceRefs", () => {
     expect(normalized).toBe("world-castle");
   });
 
-  it("normalizes template dimensions into runtime instance world id references", () => {
+  it("does not derive runtime instance world ids from legacy template dimensions", () => {
     const normalized = normalizeInstanceWorldIdForRuntime({
       dimensions: { world_template: 2 },
     });
-    expect(normalized).toBe("world-template-2");
+    expect(normalized).toBeNull();
   });
 
   it("resolves template id from instance reference before template dimensions", () => {
@@ -36,11 +36,11 @@ describe("worldInstanceRefs", () => {
     expect(resolved).toBe(5);
   });
 
-  it("resolves template id from template dimensions when no instance reference exists", () => {
+  it("does not resolve template ids from legacy template dimensions", () => {
     const resolved = resolveTemplateIdFromEntity({
       instanceWorldId: null,
       dimensions: { world_template: 7 },
     });
-    expect(resolved).toBe(7);
+    expect(resolved).toBeNull();
   });
 });

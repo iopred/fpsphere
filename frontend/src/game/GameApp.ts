@@ -7,18 +7,6 @@ import {
   type ObstacleBody,
   type PlayerBody,
 } from "./physics";
-import {
-  getTemplateRootRadius,
-  getTemplateRootSphereId,
-  instantiateSubworldChildren,
-  resolveTemplateSeedId,
-  TEMPLATE_DEFINITION_TAG,
-  TEMPLATE_ROOT_TAG,
-  SUBWORLD_SCALE_DIMENSION,
-  SUBWORLD_TEMPLATE_DIMENSION,
-  SUBWORLD_YAW_DIMENSION,
-  SUBWORLD_PITCH_DIMENSION,
-} from "./subworldTemplates";
 import { buildSeedWorld, type SeedWorld } from "./worldSeed";
 import {
   fetchWorldSeed,
@@ -56,17 +44,11 @@ import { EditorInteractionController } from "./editorInteractionController";
 import { EditorKeyboardController } from "./editorKeyboardController";
 import { EditorActionsController } from "./editorActionsController";
 import {
-  decodeTemplateIdFromInstanceWorldId,
-} from "./worldInstanceRefs";
-import {
   cloneSphereEntity,
   DEFAULT_WORLD_INSTANCE_RENDER_DEPTH,
   expandWorldRenderEntities,
   isPortalHostSphere,
-  isTemplateRootSphere,
-  readTemplateId,
   resolveReferencedWorldId,
-  resolveTemplateHostScale,
   worldReferencesInstancedWorld,
 } from "./worldRenderPipeline";
 
@@ -83,12 +65,13 @@ const CREATE_DISTANCE = 8;
 const CREATE_BOUNDARY_MARGIN = 0.35;
 const DEFAULT_WORLD_ID = "world-main";
 const NETWORK_SEND_INTERVAL_TICKS = 2;
-const TEMPLATE_NONE_ID = 0;
 const MIN_EDIT_RADIUS = 0.25;
 const MOUSE_WHEEL_RADIUS_PER_PIXEL = 0.0022;
 const DRAG_MIN_DISTANCE = 1.5;
 const TEMPLATE_ROTATE_RADIANS_PER_PIXEL = 0.0055;
 const TEMPLATE_PITCH_LIMIT_RADIANS = Math.PI * 0.495;
+const WORLD_YAW_DIMENSION = "world_yaw";
+const WORLD_PITCH_DIMENSION = "world_pitch";
 const SPHERE_COLOR_RED_DIMENSION = "r";
 const SPHERE_COLOR_GREEN_DIMENSION = "g";
 const SPHERE_COLOR_BLUE_DIMENSION = "b";
@@ -158,7 +141,6 @@ export class GameApp {
   private overlayEnabled = false;
   private editorMode = false;
   private createInstanceWorldId: string | null = null;
-  private createTemplateId = TEMPLATE_NONE_ID;
   private readonly editorInteractionController: EditorInteractionController;
   private pendingCommitOperations: WorldCommitOperation[] = [];
   private readonly userId = this.getOrCreateUserId();
@@ -285,9 +267,6 @@ export class GameApp {
         playerRadius: PLAYER_RADIUS,
         createDistance: CREATE_DISTANCE,
         createBoundaryMargin: CREATE_BOUNDARY_MARGIN,
-        templateNoneId: TEMPLATE_NONE_ID,
-        subworldTemplateDimension: SUBWORLD_TEMPLATE_DIMENSION,
-        subworldScaleDimension: SUBWORLD_SCALE_DIMENSION,
       },
       {
         getUserId: () => this.userId,
@@ -296,7 +275,6 @@ export class GameApp {
         getParentCenter: () => this.parentCenter,
         getPlayerPosition: () => this.player.position,
         getCamera: () => this.camera,
-        getCreateTemplateId: () => this.createTemplateId,
         getCreateInstanceWorldId: () => this.createInstanceWorldId,
         getTick: () => this.tick,
         getDefaultColorDimensions: () => this.getDefaultColorDimensions(),
@@ -346,10 +324,8 @@ export class GameApp {
         createBoundaryMargin: CREATE_BOUNDARY_MARGIN,
         playerRadius: PLAYER_RADIUS,
         createDistance: CREATE_DISTANCE,
-        templateNoneId: TEMPLATE_NONE_ID,
-        templateDimension: SUBWORLD_TEMPLATE_DIMENSION,
-        templateYawDimension: SUBWORLD_YAW_DIMENSION,
-        templatePitchDimension: SUBWORLD_PITCH_DIMENSION,
+        templateYawDimension: WORLD_YAW_DIMENSION,
+        templatePitchDimension: WORLD_PITCH_DIMENSION,
         templatePitchLimit: TEMPLATE_PITCH_LIMIT_RADIANS,
         templateRotateRadiansPerPixel: TEMPLATE_ROTATE_RADIANS_PER_PIXEL,
       },
@@ -856,153 +832,8 @@ export class GameApp {
     return this.worldStore.getChildSphereById(selectedSphereId);
   }
 
-  private getActiveTemplateContextSphereId(): string | null {
-    const activeParent = this.worldStore.getParentSphere();
-    return isTemplateRootSphere(activeParent) ? activeParent.id : null;
-  }
-
   private getMultiplayerWorldContext(): MultiplayerWorldContext | null {
-    const contextSphereId = this.getActiveTemplateContextSphereId();
-    if (!contextSphereId) {
-      return null;
-    }
-
-    return {
-      root_world_id: this.currentWorldId,
-      instance_path: [contextSphereId],
-    };
-  }
-
-  private getTemplateRootSphere(templateId: number): SphereEntity | null {
-    if (templateId <= TEMPLATE_NONE_ID) {
-      return null;
-    }
-
-    return this.worldStore.getSphereById(getTemplateRootSphereId(templateId));
-  }
-
-  private ensureTemplateRootSphere(templateId: number): SphereEntity | null {
-    const existing = this.getTemplateRootSphere(templateId);
-    if (existing) {
-      return existing;
-    }
-
-    const rootWorld = this.worldStore.getRootSphere();
-    const templateRoot: SphereEntity = {
-      id: getTemplateRootSphereId(templateId),
-      parentId: rootWorld.id,
-      radius: getTemplateRootRadius(templateId),
-      position3d: [...rootWorld.position3d],
-      dimensions: {
-        money: 0,
-        [SUBWORLD_TEMPLATE_DIMENSION]: templateId,
-        [SUBWORLD_SCALE_DIMENSION]: 1,
-        ...this.getDefaultColorDimensions(),
-      },
-      timeWindow: {
-        start: this.tick,
-        end: null,
-      },
-      tags: [TEMPLATE_ROOT_TAG, `template-${templateId}`],
-    };
-
-    const created = this.worldStore.apply({
-      type: "createSphere",
-      sphere: templateRoot,
-    });
-    if (!created) {
-      return this.getTemplateRootSphere(templateId);
-    }
-
-    this.queueCreateSphereOperation(templateRoot);
-    this.refreshPendingSaveMessage();
-    return templateRoot;
-  }
-
-  private seedSharedTemplateDefinitionIfNeeded(
-    templateRoot: SphereEntity,
-    sourceHost: SphereEntity,
-  ): void {
-    if (this.worldStore.listChildrenOf(templateRoot.id).length > 0) {
-      return;
-    }
-
-    const hostScale = resolveTemplateHostScale(sourceHost, templateRoot.radius);
-    const legacyChildren = this.worldStore
-      .listChildrenOf(sourceHost.id)
-      .filter((child) => !child.tags.includes("instanced-subworld"));
-
-    const nextChildren: SphereEntity[] = [];
-    if (legacyChildren.length > 0 && hostScale > 0) {
-      for (const legacyChild of legacyChildren) {
-        nextChildren.push({
-          id: `${templateRoot.id}::from-${legacyChild.id}`,
-          parentId: templateRoot.id,
-          radius: Math.max(0.05, legacyChild.radius / hostScale),
-          position3d: [
-            templateRoot.position3d[0] + (legacyChild.position3d[0] - sourceHost.position3d[0]) / hostScale,
-            templateRoot.position3d[1] + (legacyChild.position3d[1] - sourceHost.position3d[1]) / hostScale,
-            templateRoot.position3d[2] + (legacyChild.position3d[2] - sourceHost.position3d[2]) / hostScale,
-          ],
-          dimensions: { ...legacyChild.dimensions },
-          instanceWorldId: legacyChild.instanceWorldId ?? null,
-          timeWindow: { ...legacyChild.timeWindow },
-          tags: [
-            ...legacyChild.tags.filter(
-              (tag) =>
-                tag !== "instanced-subworld" &&
-                tag !== TEMPLATE_ROOT_TAG &&
-                !tag.startsWith("template-"),
-            ),
-            TEMPLATE_DEFINITION_TAG,
-          ],
-        });
-      }
-    } else {
-      const sourceTemplateId = readTemplateId(sourceHost);
-      const seedTemplateId = resolveTemplateSeedId(sourceTemplateId);
-      if (seedTemplateId === null) {
-        return;
-      }
-
-      const seedHost: SphereEntity = {
-        ...templateRoot,
-        dimensions: {
-          ...templateRoot.dimensions,
-          [SUBWORLD_TEMPLATE_DIMENSION]: seedTemplateId,
-          [SUBWORLD_SCALE_DIMENSION]: 1,
-        },
-      };
-      for (const child of instantiateSubworldChildren([seedHost])) {
-        nextChildren.push({
-          ...child,
-          tags: [
-            ...child.tags.filter(
-              (tag) => tag !== "instanced-subworld" && !tag.startsWith("template-"),
-            ),
-            TEMPLATE_DEFINITION_TAG,
-          ],
-        });
-      }
-    }
-
-    let createdCount = 0;
-    for (const child of nextChildren) {
-      const created = this.worldStore.apply({
-        type: "createSphere",
-        sphere: child,
-      });
-      if (!created) {
-        continue;
-      }
-
-      this.queueCreateSphereOperation(child);
-      createdCount += 1;
-    }
-
-    if (createdCount > 0) {
-      this.refreshPendingSaveMessage();
-    }
+    return null;
   }
 
   private ensureInstancedWorldLoaded(worldIdInput: string): void {
@@ -1078,8 +909,6 @@ export class GameApp {
   private setCreateInstanceWorldId(instanceWorldId: string | null): void {
     const normalized = this.normalizeInstanceWorldIdChoice(instanceWorldId);
     this.createInstanceWorldId = normalized;
-    this.createTemplateId =
-      decodeTemplateIdFromInstanceWorldId(normalized) ?? TEMPLATE_NONE_ID;
     this.updateTemplateHud();
   }
 
@@ -1094,34 +923,16 @@ export class GameApp {
     }
 
     const nextInstanceWorldId = this.normalizeInstanceWorldIdChoice(instanceWorldId);
-    const nextTemplateId =
-      decodeTemplateIdFromInstanceWorldId(nextInstanceWorldId) ?? TEMPLATE_NONE_ID;
-
-    const dimensionsChanged = this.worldStore.apply({
-      type: "updateSphereDimensions",
-      sphereId: selectedSphere.id,
-      dimensions: {
-        [SUBWORLD_TEMPLATE_DIMENSION]: nextTemplateId,
-      },
-    });
     const instanceWorldChanged = this.worldStore.apply({
       type: "updateSphereInstanceWorld",
       sphereId: selectedSphere.id,
       instanceWorldId: nextInstanceWorldId,
     });
 
-    if (!dimensionsChanged && !instanceWorldChanged) {
+    if (!instanceWorldChanged) {
       return;
     }
-
-    if (dimensionsChanged) {
-      this.queueUpdateDimensionsOperation(selectedSphere.id, {
-        [SUBWORLD_TEMPLATE_DIMENSION]: nextTemplateId,
-      });
-    }
-    if (instanceWorldChanged) {
-      this.queueUpdateInstanceWorldOperation(selectedSphere.id, nextInstanceWorldId);
-    }
+    this.queueUpdateInstanceWorldOperation(selectedSphere.id, nextInstanceWorldId);
     this.refreshPendingSaveMessage();
     this.updateTemplateHud();
   }
@@ -1162,9 +973,6 @@ export class GameApp {
     );
     if (normalizedCreateInstanceWorldId !== this.createInstanceWorldId) {
       this.createInstanceWorldId = normalizedCreateInstanceWorldId;
-      this.createTemplateId =
-        decodeTemplateIdFromInstanceWorldId(normalizedCreateInstanceWorldId) ??
-        TEMPLATE_NONE_ID;
     }
 
     const selectedSphere = this.getSelectedEditableSphere();
@@ -1241,9 +1049,7 @@ export class GameApp {
     const expandedChildren = expandWorldRenderEntities({
       snapshot,
       currentWorldId: this.currentWorldId,
-      listChildrenOf: (sphereId) => this.worldStore.listChildrenOf(sphereId),
       listDescendantsOf: (sphereId) => this.worldStore.listDescendantsOf(sphereId),
-      getSphereById: (sphereId) => this.worldStore.getSphereById(sphereId),
       instancedWorldById: this.instancedWorldById,
       ensureInstancedWorldLoaded: (worldId) => this.ensureInstancedWorldLoaded(worldId),
       worldInstanceRenderDepth: DEFAULT_WORLD_INSTANCE_RENDER_DEPTH,
@@ -1270,8 +1076,7 @@ export class GameApp {
       const portalHost = isPortalHostSphere(entity);
       const selectable =
         entity.parentId === snapshot.parent.id &&
-        !instancedSubworld &&
-        !isTemplateRootSphere(entity);
+        !instancedSubworld;
 
       const existingBody = this.obstacleBodiesById.get(entity.id);
       if (!existingBody) {
@@ -1632,8 +1437,7 @@ export class GameApp {
       !obstacle.portalHost ||
       obstacle.instancedSubworld ||
       !entity.tags.includes("world-instance") ||
-      !entity.tags.includes("user-created") ||
-      isTemplateRootSphere(entity)
+      !entity.tags.includes("user-created")
     ) {
       return;
     }

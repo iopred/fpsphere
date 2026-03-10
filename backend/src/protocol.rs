@@ -658,37 +658,13 @@ fn filter_world_snapshot_by_time_window(
     }
 }
 
-const WORLD_TEMPLATE_DIMENSION: &str = "world_template";
-const TEMPLATE_ROOT_TAG: &str = "template-root";
-const TEMPLATE_INSTANCE_WORLD_PREFIX: &str = "world-template-";
-
-fn read_template_id(entity: &SphereEntity) -> Option<i32> {
-    let value = *entity.dimensions.get(WORLD_TEMPLATE_DIMENSION)?;
-    if !value.is_finite() {
-        return None;
-    }
-
-    let truncated = value.trunc();
-    if truncated <= 0.0 || truncated > i32::MAX as f32 {
-        return None;
-    }
-
-    Some(truncated as i32)
-}
-
 fn normalize_instance_world_reference(entity: &mut SphereEntity) {
-    if let Some(normalized) = entity
+    entity.instance_world_id = entity
         .instance_world_id
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-    {
-        entity.instance_world_id = Some(normalized.to_string());
-        return;
-    }
-
-    entity.instance_world_id = read_template_id(entity)
-        .map(|template_id| format!("{}{}", TEMPLATE_INSTANCE_WORLD_PREFIX, template_id));
+        .map(str::to_string);
 }
 
 fn normalize_world_instance_world_references(world: &mut WorldSnapshot) {
@@ -699,7 +675,6 @@ fn normalize_world_instance_world_references(world: &mut WorldSnapshot) {
 
 fn normalize_world_snapshot_runtime(world: &mut WorldSnapshot) {
     ensure_world_has_root(world);
-    compact_shared_template_legacy_descendants(world);
     normalize_world_instance_world_references(world);
 }
 
@@ -737,94 +712,6 @@ fn ensure_world_has_root(world: &mut WorldSnapshot) {
         },
         tags: vec!["world".to_string()],
     });
-}
-
-fn compact_shared_template_legacy_descendants(world: &mut WorldSnapshot) {
-    if world.entities.len() < 2 {
-        return;
-    }
-
-    let mut children_by_parent: HashMap<String, Vec<String>> = HashMap::new();
-    for entity in &world.entities {
-        if let Some(parent_id) = &entity.parent_id {
-            children_by_parent
-                .entry(parent_id.clone())
-                .or_default()
-                .push(entity.id.clone());
-        }
-    }
-
-    let mut template_root_ids: HashSet<String> = HashSet::new();
-    let mut template_ids_with_shared_definition: HashSet<i32> = HashSet::new();
-
-    for entity in &world.entities {
-        if !entity.tags.iter().any(|tag| tag == TEMPLATE_ROOT_TAG) {
-            continue;
-        }
-
-        template_root_ids.insert(entity.id.clone());
-
-        let template_id = match read_template_id(entity) {
-            Some(value) => value,
-            None => continue,
-        };
-
-        if let Some(children) = children_by_parent.get(&entity.id) {
-            if !children.is_empty() {
-                template_ids_with_shared_definition.insert(template_id);
-            }
-        }
-    }
-
-    if template_ids_with_shared_definition.is_empty() {
-        return;
-    }
-
-    let mut remove_ids: HashSet<String> = HashSet::new();
-
-    for entity in &world.entities {
-        if template_root_ids.contains(&entity.id) {
-            continue;
-        }
-
-        let template_id = match read_template_id(entity) {
-            Some(value) => value,
-            None => continue,
-        };
-
-        if !template_ids_with_shared_definition.contains(&template_id) {
-            continue;
-        }
-
-        let mut stack = children_by_parent
-            .get(&entity.id)
-            .cloned()
-            .unwrap_or_default();
-
-        while let Some(descendant_id) = stack.pop() {
-            if template_root_ids.contains(&descendant_id) {
-                continue;
-            }
-
-            if !remove_ids.insert(descendant_id.clone()) {
-                continue;
-            }
-
-            if let Some(children) = children_by_parent.get(&descendant_id) {
-                for child_id in children {
-                    stack.push(child_id.clone());
-                }
-            }
-        }
-    }
-
-    if remove_ids.is_empty() {
-        return;
-    }
-
-    world
-        .entities
-        .retain(|entity| !remove_ids.contains(&entity.id));
 }
 
 fn apply_commit_operations(
@@ -1060,8 +947,6 @@ pub fn example_world_snapshot() -> WorldSnapshot {
 
     let mut world_instance_dimensions = BTreeMap::new();
     world_instance_dimensions.insert("money".to_string(), 0.35);
-    world_instance_dimensions.insert("world_template".to_string(), 1.0);
-    world_instance_dimensions.insert("world_scale".to_string(), 1.0);
 
     WorldSnapshot {
         world_id: "world-main".to_string(),
@@ -1266,70 +1151,6 @@ mod tests {
         }
     }
 
-    fn make_template_root_sphere(template_id: i32) -> SphereEntity {
-        let mut dimensions = BTreeMap::new();
-        dimensions.insert("money".to_string(), 0.0);
-        dimensions.insert("world_template".to_string(), template_id as f32);
-        dimensions.insert("world_scale".to_string(), 1.0);
-
-        SphereEntity {
-            id: format!("sphere-template-root-{}", template_id),
-            parent_id: Some("sphere-world-001".to_string()),
-            radius: 12.0,
-            position_3d: [0.0, 0.0, 0.0],
-            dimensions,
-            instance_world_id: None,
-            time_window: TimeWindow {
-                start_tick: 0,
-                end_tick: None,
-            },
-            tags: vec![
-                "template-root".to_string(),
-                format!("template-{}", template_id),
-            ],
-        }
-    }
-
-    fn make_template_definition_sphere(id: &str, parent_id: &str) -> SphereEntity {
-        let mut dimensions = BTreeMap::new();
-        dimensions.insert("money".to_string(), 0.5);
-
-        SphereEntity {
-            id: id.to_string(),
-            parent_id: Some(parent_id.to_string()),
-            radius: 1.2,
-            position_3d: [0.0, -1.0, 0.0],
-            dimensions,
-            instance_world_id: None,
-            time_window: TimeWindow {
-                start_tick: 0,
-                end_tick: None,
-            },
-            tags: vec!["template-definition".to_string()],
-        }
-    }
-
-    fn make_template_host_sphere(id: &str, template_id: i32, parent_id: &str) -> SphereEntity {
-        let mut dimensions = BTreeMap::new();
-        dimensions.insert("money".to_string(), 0.2);
-        dimensions.insert("world_template".to_string(), template_id as f32);
-        dimensions.insert("world_scale".to_string(), 1.0);
-
-        SphereEntity {
-            id: id.to_string(),
-            parent_id: Some(parent_id.to_string()),
-            radius: 4.0,
-            position_3d: [1.5, -1.2, 2.2],
-            dimensions,
-            instance_world_id: None,
-            time_window: TimeWindow {
-                start_tick: 0,
-                end_tick: None,
-            },
-            tags: vec!["world-instance".to_string()],
-        }
-    }
-
     fn make_time_windowed_sphere(
         id: &str,
         parent_id: &str,
@@ -1478,30 +1299,22 @@ mod tests {
     }
 
     #[test]
-    fn get_world_snapshot_compacts_legacy_template_descendants() {
+    fn get_world_snapshot_keeps_world_instance_descendants() {
         let mut world = example_world_snapshot();
-        let template_root = make_template_root_sphere(1);
-        let template_definition = make_template_definition_sphere(
-            "sphere-template-root-1::definition-001",
-            &template_root.id,
-        );
-        let legacy_child = make_child_sphere(
-            "sphere-legacy-host-child-001",
+        let host_child = make_child_sphere(
+            "sphere-host-child-001",
             "sphere-world-instance-001",
             1.4,
             [18.8, -2.2, 14.2],
         );
-        let legacy_grandchild = make_child_sphere(
-            "sphere-legacy-host-grandchild-001",
-            "sphere-legacy-host-child-001",
+        let host_grandchild = make_child_sphere(
+            "sphere-host-grandchild-001",
+            "sphere-host-child-001",
             0.7,
             [19.1, -2.0, 14.6],
         );
-
-        world.entities.push(template_root);
-        world.entities.push(template_definition);
-        world.entities.push(legacy_child);
-        world.entities.push(legacy_grandchild);
+        world.entities.push(host_child);
+        world.entities.push(host_grandchild);
 
         let repository = WorldRepository::new(world);
         let snapshot = repository
@@ -1511,15 +1324,11 @@ mod tests {
         assert!(snapshot
             .entities
             .iter()
-            .any(|entity| entity.id == "sphere-template-root-1::definition-001"));
-        assert!(!snapshot
+            .any(|entity| entity.id == "sphere-host-child-001"));
+        assert!(snapshot
             .entities
             .iter()
-            .any(|entity| entity.id == "sphere-legacy-host-child-001"));
-        assert!(!snapshot
-            .entities
-            .iter()
-            .any(|entity| entity.id == "sphere-legacy-host-grandchild-001"));
+            .any(|entity| entity.id == "sphere-host-grandchild-001"));
     }
 
     #[test]
@@ -1787,75 +1596,12 @@ mod tests {
     }
 
     #[test]
-    fn commit_compacts_legacy_template_descendants_when_shared_definition_exists() {
+    fn commit_keeps_world_instance_descendants() {
         let mut repository = WorldRepository::new(example_world_snapshot());
-
-        let template_root = make_template_root_sphere(1);
-        let template_definition = make_template_definition_sphere(
-            "sphere-template-root-1::definition-002",
-            &template_root.id,
-        );
-        let legacy_child = make_child_sphere(
-            "sphere-legacy-host-child-002",
-            "sphere-world-instance-001",
-            1.4,
-            [18.5, -2.4, 13.7],
-        );
-        let legacy_grandchild = make_child_sphere(
-            "sphere-legacy-host-grandchild-002",
-            "sphere-legacy-host-child-002",
-            0.7,
-            [18.9, -2.1, 13.9],
-        );
-
-        let response = repository
-            .commit(
-                "world-main",
-                CommitRequest {
-                    user_id: "alice".to_string(),
-                    base_tick: 0,
-                    operations: vec![
-                        CommitOperation::Create {
-                            sphere: template_root,
-                        },
-                        CommitOperation::Create {
-                            sphere: template_definition,
-                        },
-                        CommitOperation::Create {
-                            sphere: legacy_child,
-                        },
-                        CommitOperation::Create {
-                            sphere: legacy_grandchild,
-                        },
-                    ],
-                },
-            )
-            .expect("commit should succeed");
-
-        assert!(response
-            .world
-            .entities
-            .iter()
-            .any(|entity| entity.id == "sphere-template-root-1::definition-002"));
-        assert!(!response
-            .world
-            .entities
-            .iter()
-            .any(|entity| entity.id == "sphere-legacy-host-child-002"));
-        assert!(!response
-            .world
-            .entities
-            .iter()
-            .any(|entity| entity.id == "sphere-legacy-host-grandchild-002"));
-    }
-
-    #[test]
-    fn commit_keeps_host_descendants_without_shared_template_definition() {
-        let mut repository = WorldRepository::new(example_world_snapshot());
-        let host = make_template_host_sphere("sphere-template-host-099", 99, "sphere-world-001");
+        let host = make_world_instance_sphere("sphere-world-instance-099", "world-template-1");
         let host_child = make_child_sphere(
-            "sphere-template-host-099-child-001",
-            "sphere-template-host-099",
+            "sphere-world-instance-099-child-001",
+            "sphere-world-instance-099",
             0.8,
             [1.8, -1.3, 2.5],
         );
@@ -1878,7 +1624,7 @@ mod tests {
             .world
             .entities
             .iter()
-            .any(|entity| entity.id == "sphere-template-host-099-child-001"));
+            .any(|entity| entity.id == "sphere-world-instance-099-child-001"));
     }
 
     #[test]
@@ -2090,8 +1836,8 @@ mod tests {
     fn commit_can_update_dimensions() {
         let mut repository = WorldRepository::new(example_world_snapshot());
         let mut dimensions = BTreeMap::new();
-        dimensions.insert("world_template".to_string(), 1.0);
-        dimensions.insert("world_scale".to_string(), 0.5);
+        dimensions.insert("r".to_string(), 0.25);
+        dimensions.insert("g".to_string(), 0.5);
 
         let response = repository
             .commit(
@@ -2113,8 +1859,8 @@ mod tests {
             .iter()
             .find(|item| item.id == "sphere-building-001")
             .expect("updated sphere");
-        assert_eq!(updated.dimensions.get("world_template"), Some(&1.0));
-        assert_eq!(updated.dimensions.get("world_scale"), Some(&0.5));
+        assert_eq!(updated.dimensions.get("r"), Some(&0.25));
+        assert_eq!(updated.dimensions.get("g"), Some(&0.5));
     }
 
     #[test]
@@ -2296,7 +2042,7 @@ mod tests {
     }
 
     #[test]
-    fn get_world_snapshot_derives_instance_world_id_from_legacy_template_dimension() {
+    fn get_world_snapshot_keeps_explicit_instance_world_id() {
         let repository = WorldRepository::new(example_world_snapshot());
         let snapshot = repository
             .get_world_snapshot("world-main", None)
@@ -2314,12 +2060,9 @@ mod tests {
     }
 
     #[test]
-    fn explicit_instance_world_id_is_preserved_when_world_template_dimension_exists() {
+    fn commit_trims_instance_world_id() {
         let mut repository = WorldRepository::new(example_world_snapshot());
         let mut world_instance = make_test_sphere("sphere-world-instance-explicit-001");
-        world_instance
-            .dimensions
-            .insert("world_template".to_string(), 2.0);
         world_instance.instance_world_id = Some(" world-custom-002 ".to_string());
 
         let response = repository

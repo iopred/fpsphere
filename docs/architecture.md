@@ -28,8 +28,7 @@ Core entity contract: `SphereEntity`
 
 Dimension conventions currently used:
 - `money`: overlay scalar for the blue SDF-style visualization.
-- `world_template`: numeric client-side template ID for subworld instancing.
-- `world_scale`: optional additional multiplier for template expansion.
+- `r`, `g`, `b`: optional per-sphere color channels used for tint/visual overrides.
 
 ## Tick and simulation semantics
 

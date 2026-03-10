@@ -185,7 +185,6 @@ function transformBackendEntity(entity: BackendSphereEntity): unknown {
     dimensions: entity.dimensions ?? {},
     instanceWorldId: normalizeInstanceWorldIdForRuntime({
       instanceWorldId: entity.instance_world_id ?? null,
-      dimensions: entity.dimensions ?? {},
     }),
     timeWindow: {
       start: entity.time_window?.start_tick ?? 0,

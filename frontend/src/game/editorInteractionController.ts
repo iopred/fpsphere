@@ -13,8 +13,6 @@ export interface EditorInteractionConfig {
   createBoundaryMargin: number;
   playerRadius: number;
   createDistance: number;
-  templateNoneId: number;
-  templateDimension: string;
   templateYawDimension: string;
   templatePitchDimension: string;
   templatePitchLimit: number;
@@ -298,12 +296,8 @@ export class EditorInteractionController {
       return false;
     }
 
-    const rawTemplateId = sphere.dimensions[this.config.templateDimension];
-    if (!Number.isFinite(rawTemplateId)) {
-      return false;
-    }
-
-    return Math.trunc(rawTemplateId) > this.config.templateNoneId;
+    const normalizedInstanceWorldId = sphere.instanceWorldId?.trim();
+    return Boolean(normalizedInstanceWorldId);
   }
 
   private readFiniteDimension(

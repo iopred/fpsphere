@@ -26,7 +26,6 @@ import {
   DEFAULT_WORLD_INSTANCE_RENDER_DEPTH,
   expandWorldRenderEntities,
   isPortalHostSphere,
-  isTemplateRootSphere,
   worldReferencesInstancedWorld,
 } from "../game/worldRenderPipeline";
 import {
@@ -1095,9 +1094,7 @@ export class FpsphereArApp {
     const expandedChildren = expandWorldRenderEntities({
       snapshot,
       currentWorldId: this.currentWorldId,
-      listChildrenOf: (sphereId) => this.worldStore.listChildrenOf(sphereId),
       listDescendantsOf: (sphereId) => this.worldStore.listDescendantsOf(sphereId),
-      getSphereById: (sphereId) => this.worldStore.getSphereById(sphereId),
       instancedWorldById: this.instancedWorldById,
       ensureInstancedWorldLoaded: (worldId) => this.ensureInstancedWorldLoaded(worldId),
       worldInstanceRenderDepth: DEFAULT_WORLD_INSTANCE_RENDER_DEPTH,

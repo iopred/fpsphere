@@ -7,9 +7,6 @@ export interface EditorActionsConfig {
   playerRadius: number;
   createDistance: number;
   createBoundaryMargin: number;
-  templateNoneId: number;
-  subworldTemplateDimension: string;
-  subworldScaleDimension: string;
 }
 
 export interface EditorActionsCallbacks {
@@ -19,7 +16,6 @@ export interface EditorActionsCallbacks {
   getParentCenter: () => THREE.Vector3;
   getPlayerPosition: () => THREE.Vector3;
   getCamera: () => THREE.Camera;
-  getCreateTemplateId: () => number;
   getCreateInstanceWorldId: () => string | null;
   getTick: () => number;
   getDefaultColorDimensions: () => Record<string, number>;
@@ -91,16 +87,11 @@ export class EditorActionsController {
       }
     }
 
-    const createTemplateId = this.callbacks.getCreateTemplateId();
     const createInstanceWorldId = this.callbacks.getCreateInstanceWorldId()?.trim() || null;
     const dimensions: Record<string, number> = {
       money: this.callbacks.randomMoney(),
-      [this.config.subworldTemplateDimension]: createTemplateId,
       ...this.callbacks.getDefaultColorDimensions(),
     };
-    if (createInstanceWorldId || createTemplateId > this.config.templateNoneId) {
-      dimensions[this.config.subworldScaleDimension] = 1;
-    }
 
     const tags = ["user-created"];
     if (createInstanceWorldId) {

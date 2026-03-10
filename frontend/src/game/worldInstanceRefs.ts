@@ -1,6 +1,5 @@
 import type { SphereEntity } from "@fpsphere/shared-types";
 
-const TEMPLATE_DIMENSION = "world_template";
 export const TEMPLATE_INSTANCE_WORLD_PREFIX = "world-template-";
 
 function readPositiveInteger(value: number | undefined): number | null {
@@ -49,14 +48,7 @@ export function normalizeInstanceWorldIdForRuntime(input: {
     return directReference;
   }
 
-  const templateId = readPositiveInteger(
-    input.dimensions?.[TEMPLATE_DIMENSION],
-  );
-  if (templateId === null) {
-    return null;
-  }
-
-  return `${TEMPLATE_INSTANCE_WORLD_PREFIX}${templateId}`;
+  return null;
 }
 
 export function resolveTemplateIdFromEntity(
@@ -73,5 +65,5 @@ export function resolveTemplateIdFromEntity(
     return fromInstanceReference;
   }
 
-  return readPositiveInteger(entity.dimensions[TEMPLATE_DIMENSION]);
+  return null;
 }

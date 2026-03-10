@@ -91,7 +91,7 @@
   "base_tick": 7,
   "world_context": {
     "root_world_id": "world-main",
-    "instance_path": ["sphere-template-root-1"]
+    "instance_path": ["sphere-world-instance-001"]
   },
   "operations": [
     {
@@ -115,8 +115,8 @@
       "type": "update_dimensions",
       "sphere_id": "sphere-building-001",
       "dimensions": {
-        "world_template": 1,
-        "world_scale": 0.75
+        "r": 0.35,
+        "g": 0.45
       }
     },
     {
@@ -143,17 +143,12 @@
 - If master commit cannot be applied, backend attempts to save same operations into the user's branch.
 - If user-branch save also fails validation, commit is rejected with `409`.
 
-## Dimension-driven world instancing
+## Nested world references
 
-- `instance_world_id` is the explicit nested-world reference field on sphere entities.
-- Sphere dimensions may include:
-  - `world_template` (numeric template ID)
-  - `world_scale` (optional numeric scale multiplier)
-- The backend stores these dimensions as normal sphere data.
-- The frontend expands template children client-side from these dimensions, so the server does not need to duplicate subworld child entities.
-- When `instance_world_id` is missing and `world_template` is present, backend/runtime normalization derives:
-  - `instance_world_id = "world-template-<template_id>"`.
-- Explicit `instance_world_id` values take precedence over template-dimension fallback.
+- `instance_world_id` is the only runtime nested-world reference field on sphere entities.
+- `dimensions` remain generic scalar channels (for example, `money`, `r`, `g`, `b`).
+- Backend and frontend no longer derive world references from legacy template dimensions.
+- Legacy static template expansion/compaction paths are removed from active runtime behavior.
 
 ## WebSocket multiplayer messages
 
@@ -167,7 +162,7 @@ Client -> server:
   "avatar_id": "human",
   "world_context": {
     "root_world_id": "world-main",
-    "instance_path": ["sphere-template-root-1"]
+    "instance_path": ["sphere-world-instance-001"]
   }
 }
 ```
@@ -309,7 +304,7 @@ Delivery semantics:
   - world context partition first (active context subtree),
   - then hierarchical spatial hash grid AOI selection (`AoiDomain::WorldEntities` policy).
   - full `instance_path` chain validation is applied; invalid/mismatched context paths fail closed.
-  - legacy `template-root` fallback filtering is not used for world-entity AOI scoping.
+  - legacy template-root fallback filtering is not used for world-entity AOI scoping.
 - `saved_to = master`: delivered only when session `world_context` matches commit `world_context`.
 - `saved_to = user`: delivered only to connections for that same `user_id` and `world_id`.
 

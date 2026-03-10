@@ -63,8 +63,6 @@ function expandForSnapshot(snapshot: WorldStoreSnapshot): SphereEntity[] {
   return expandWorldRenderEntities({
     snapshot,
     currentWorldId: "world-main",
-    listChildrenOf: (parentId) =>
-      [...entitiesById.values()].filter((entity) => entity.parentId === parentId),
     listDescendantsOf: (parentId) => {
       const descendants: SphereEntity[] = [];
       const queue: string[] = [parentId];
@@ -83,7 +81,6 @@ function expandForSnapshot(snapshot: WorldStoreSnapshot): SphereEntity[] {
       }
       return descendants;
     },
-    getSphereById: (sphereId) => entitiesById.get(sphereId) ?? null,
     instancedWorldById,
     ensureInstancedWorldLoaded: ensureLoaded,
     worldInstanceRenderDepth: DEFAULT_WORLD_INSTANCE_RENDER_DEPTH,
@@ -113,18 +110,8 @@ function projectInstancedEntities(entities: SphereEntity[]): Array<{
 }
 
 describe("worldRenderPipeline", () => {
-  it("keeps legacy world_template parity with explicit instanceWorldId for referenced worlds", () => {
-    const hostFromLegacyDimension = sphere({
-      id: "host",
-      parentId: "sphere-root",
-      radius: 10,
-      dimensions: {
-        money: 0.25,
-        world_template: 1,
-      },
-      tags: ["world-instance"],
-    });
-    const hostFromExplicitReference = sphere({
+  it("expands referenced worlds from explicit instanceWorldId", () => {
+    const host = sphere({
       id: "host",
       parentId: "sphere-root",
       radius: 10,
@@ -135,15 +122,16 @@ describe("worldRenderPipeline", () => {
       tags: ["world-instance"],
     });
 
-    const legacyExpanded = expandForSnapshot(makeSnapshot(hostFromLegacyDimension));
-    const explicitExpanded = expandForSnapshot(makeSnapshot(hostFromExplicitReference));
-
-    expect(projectInstancedEntities(legacyExpanded)).toEqual(
-      projectInstancedEntities(explicitExpanded),
+    const expanded = expandForSnapshot(makeSnapshot(host));
+    const hasReferencedWorldTag = expanded.some((entity) =>
+      entity.tags.some((tag) => tag === "world-instance-world-template-1"),
     );
+
+    expect(hasReferencedWorldTag).toBe(true);
+    expect(projectInstancedEntities(expanded)).toHaveLength(1);
   });
 
-  it("does not generate legacy static-template fallback when a world reference is resolvable", () => {
+  it("does not expand worlds from legacy world_template dimensions", () => {
     const host = sphere({
       id: "host",
       parentId: "sphere-root",
@@ -156,14 +144,7 @@ describe("worldRenderPipeline", () => {
     });
 
     const expanded = expandForSnapshot(makeSnapshot(host));
-    const hasLegacyTemplateTag = expanded.some((entity) =>
-      entity.tags.some((tag) => tag === "template-1"),
-    );
-    const hasReferencedWorldTag = expanded.some((entity) =>
-      entity.tags.some((tag) => tag === "world-instance-world-template-1"),
-    );
 
-    expect(hasLegacyTemplateTag).toBe(false);
-    expect(hasReferencedWorldTag).toBe(true);
+    expect(projectInstancedEntities(expanded)).toEqual([]);
   });
 });

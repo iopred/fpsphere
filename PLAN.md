@@ -552,14 +552,16 @@ Epic tracking:
   - emit periodic aggregate trend logs on `fpsphere_backend::aoi_metrics`.
 - [x] `S6-C5` Remove legacy `focus_sphere_id` from multiplayer protocol and runtime state after `world_context` rollout verification.
 
-#### S6-D Migration + Cleanup (Deferred from Sprint 6)
+#### S6-D Migration + Cleanup
 
 - [x] `S6-D1` Deferred by scope decision:
   - direct v2 cutover was used, so a temporary feature flag rollout was skipped.
 - [x] `S6-D2` Deferred by scope decision:
   - staged migration was not required for current project phase.
-- [x] `S6-D3` Deferred to future hardening:
-  - legacy compaction/instancing cleanup remains tracked as post-sprint cleanup.
+- [x] `S6-D3` Remove legacy template compaction/instancing paths after parity signoff.
+  - backend legacy template-descendant compaction removed.
+  - frontend legacy static template fallback instancing removed.
+  - runtime world reference derivation from legacy `world_template` dimensions removed.
 
 #### 13.4.2 Sprint 6 Acceptance Criteria
 
@@ -570,7 +572,6 @@ Epic tracking:
 - [x] AOI world-entity stream uses HSHG filtering and exports trend metrics (candidates, returned, query time, payload bytes).
 - [x] Representative legacy vs v2 render parity scenes are covered by frontend tests.
 - [ ] Post-sprint cleanup remains:
-  - remove remaining legacy template compaction/instancing code paths.
   - add datastore migration/version scaffolding and rollback tooling.
 
 #### 13.4.3 Sprint 6 Verification

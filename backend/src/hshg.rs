@@ -173,10 +173,6 @@ impl HierarchicalSpatialHashGrid {
         )
     }
 
-    pub fn query_radius(&self, center: [f32; 3], radius: f32, max_results: usize) -> Vec<String> {
-        self.query_radius_with_stats(center, radius, max_results).0
-    }
-
     fn level_for_radius(&self, radius: f32) -> u8 {
         let sanitized_radius = if radius.is_finite() && radius > 0.0 {
             radius
@@ -256,7 +252,7 @@ mod tests {
             },
         ]);
 
-        let ids = index.query_radius([0.0, 0.0, 0.0], 8.0, 8);
+        let ids = index.query_radius_with_stats([0.0, 0.0, 0.0], 8.0, 8).0;
         assert_eq!(ids, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
     }
 
@@ -281,7 +277,7 @@ mod tests {
             },
         ]);
 
-        let ids = index.query_radius([0.0, 0.0, 0.0], 12.0, 10);
+        let ids = index.query_radius_with_stats([0.0, 0.0, 0.0], 12.0, 10).0;
         assert_eq!(
             ids,
             vec!["small-near".to_string(), "large-near".to_string()]
@@ -309,8 +305,8 @@ mod tests {
             },
         ]);
 
-        let first = index.query_radius([0.0, 0.0, 0.0], 10.0, 10);
-        let second = index.query_radius([0.0, 0.0, 0.0], 10.0, 10);
+        let first = index.query_radius_with_stats([0.0, 0.0, 0.0], 10.0, 10).0;
+        let second = index.query_radius_with_stats([0.0, 0.0, 0.0], 10.0, 10).0;
         assert_eq!(first, second);
     }
 }

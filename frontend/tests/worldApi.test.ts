@@ -64,7 +64,7 @@ describe("worldApi", () => {
     expect(loaded.world.children[0].instanceWorldId).toBeNull();
   });
 
-  it("derives runtime instanceWorldId from world_template when explicit reference is absent", async () => {
+  it("does not derive runtime instanceWorldId from legacy world_template dimensions", async () => {
     const payload = backendSnapshotPayload();
     payload.entities[1].dimensions = {
       money: 0.2,
@@ -80,10 +80,10 @@ describe("worldApi", () => {
     }) as typeof globalThis.fetch;
 
     const loaded = await fetchWorldSeed("world-main", "user-1");
-    expect(loaded.world.children[0].instanceWorldId).toBe("world-template-1");
+    expect(loaded.world.children[0].instanceWorldId).toBeNull();
   });
 
-  it("prefers explicit instance_world_id over world_template fallback", async () => {
+  it("uses explicit instance_world_id even when legacy template dimensions exist", async () => {
     const payload = backendSnapshotPayload();
     payload.entities[1].dimensions = {
       money: 0.2,
@@ -267,7 +267,7 @@ describe("worldApi", () => {
       expect(body.base_tick).toBe(4);
       expect(body.world_context).toEqual({
         root_world_id: "world-main",
-        instance_path: ["sphere-template-root-1"],
+        instance_path: ["sphere-world-instance-001"],
       });
       expect(body.operations).toHaveLength(5);
       expect(body.operations[0].type).toBe("create");
@@ -275,7 +275,7 @@ describe("worldApi", () => {
       expect(body.operations[2]).toEqual({
         type: "update_dimensions",
         sphere_id: "sphere-keep-001",
-        dimensions: { world_template: 1 },
+        dimensions: { r: 0.25 },
       });
       expect(body.operations[3]).toEqual({
         type: "update_instance_world",
@@ -346,7 +346,7 @@ describe("worldApi", () => {
       {
         type: "updateDimensions",
         sphereId: "sphere-keep-001",
-        dimensions: { world_template: 1 },
+        dimensions: { r: 0.25 },
       },
       {
         type: "updateInstanceWorld",
@@ -367,7 +367,7 @@ describe("worldApi", () => {
       operations,
       worldContext: {
         root_world_id: "world-main",
-        instance_path: ["sphere-template-root-1"],
+        instance_path: ["sphere-world-instance-001"],
       },
     });
 
