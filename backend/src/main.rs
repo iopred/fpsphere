@@ -20,9 +20,9 @@ use multiplayer::{
     MultiplayerWorldContext, PlayerInputEnqueueResult, ServerMultiplayerMessage,
 };
 use protocol::{
-    example_seed_world_snapshots, world_repository_schema_version, CommitFailure, CommitOperation,
-    CommitRequest, CommitResponse, CommitTarget, SphereEntity, TemporalWorldQuery,
-    WorldMutationFailure, WorldRepository, WorldSnapshot,
+    example_seed_world_snapshots, CommitFailure, CommitOperation, CommitRequest, CommitResponse,
+    CommitTarget, SphereEntity, TemporalWorldQuery, WorldMutationFailure, WorldRepository,
+    WorldSnapshot,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -466,66 +466,20 @@ async fn load_repository(
     seed_worlds: &[WorldSnapshot],
 ) -> WorldRepository {
     match datastore.load().await {
-        Ok(Some(state)) => {
-            let loaded_schema_version = state.schema_version;
-            match WorldRepository::from_persisted_state(state) {
-                Ok(repository) => {
-                    let current_schema_version = world_repository_schema_version();
-                    if loaded_schema_version < current_schema_version {
-                        let backup_reason = format!(
-                            "migrate-v{}-to-v{}",
-                            loaded_schema_version, current_schema_version
-                        );
-                        match datastore.backup_existing(&backup_reason).await {
-                        Ok(Some(path)) => tracing::info!(
-                            "backed up datastore before schema migration: {}",
-                            path.display()
-                        ),
-                        Ok(None) => tracing::info!(
-                            "datastore migration requested but no existing datastore file was found for backup"
-                        ),
-                        Err(error) => {
-                            tracing::warn!(
-                                "failed to back up datastore before schema migration ({}); skipping automatic rewrite",
-                                error
-                            );
-                            tracing::info!(
-                                "loaded world datastore from {}",
-                                datastore.path().display()
-                            );
-                            return repository;
-                        }
-                    }
-
-                        let migrated_state = repository.to_persisted_state();
-                        match datastore.save(&migrated_state).await {
-                        Ok(_) => tracing::info!(
-                            "rewrote datastore at {} after schema migration to v{}",
-                            datastore.path().display(),
-                            current_schema_version
-                        ),
-                        Err(error) => tracing::warn!(
-                            "loaded datastore schema v{} and migrated in-memory, but failed to rewrite datastore ({}): {}",
-                            loaded_schema_version,
-                            datastore.path().display(),
-                            error
-                        ),
-                    }
-                    }
-
-                    tracing::info!("loaded world datastore from {}", datastore.path().display());
-                    repository
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        "invalid persisted datastore state ({}); using seed snapshot",
-                        error
-                    );
-                    WorldRepository::new_with_worlds(seed_worlds.to_vec())
-                        .expect("seed worlds must be valid")
-                }
+        Ok(Some(state)) => match WorldRepository::from_persisted_state(state) {
+            Ok(repository) => {
+                tracing::info!("loaded world datastore from {}", datastore.path().display());
+                repository
             }
-        }
+            Err(error) => {
+                tracing::warn!(
+                    "invalid persisted datastore state ({}); using seed snapshot",
+                    error
+                );
+                WorldRepository::new_with_worlds(seed_worlds.to_vec())
+                    .expect("seed worlds must be valid")
+            }
+        },
         Ok(None) => {
             tracing::info!(
                 "no datastore file found at {}; using seed snapshot",

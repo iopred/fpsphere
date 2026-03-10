@@ -96,7 +96,8 @@ Current implementation includes:
    - Backend loads/saves world state as JSON.
    - Default path: `backend/data/world-repository.json`.
    - Override path with `WORLD_DATASTORE_PATH=/absolute/or/relative/path.json`.
-   - Startup migrates older datastore schema versions in place (currently v1 -> v2), creating a timestamped backup before rewrite.
+   - Datastore schema must match the current backend schema version (`2`).
+   - If schema does not match, backend logs a warning and boots with seed world data.
    - Datastore saves use temp-file + atomic rename.
 
 ## Docker deployment

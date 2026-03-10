@@ -516,12 +516,12 @@ Epic tracking:
   - prevent recursive cycles with bounded depth + cycle detection.
 - [x] `S6-A3` Add backend compatibility adapter:
   - map legacy `world_template`/`world_scale` representations to v2 runtime shape.
-  - keep legacy read support during migration.
+  - legacy read support was temporary and has since been removed after v2 cutover cleanup.
 - [x] `S6-A4` Add backend v2 write path:
   - editing a nested world updates that world only.
   - instance transforms remain owned by the parent world.
 - [x] `S6-A5` Scope adjustment:
-  - migration/version scaffolding moved out of Sprint 6 to persistence hardening follow-up (section 14.4) after direct v2 cutover decision.
+  - migration/version scaffolding was implemented for cutover validation, then removed to keep runtime schema handling strict and simple.
 
 #### S6-B Frontend Runtime + Editor
 
@@ -571,10 +571,9 @@ Epic tracking:
 - [x] Multiplayer/AOI world-entity filtering respects world context and blocks cross-context leakage.
 - [x] AOI world-entity stream uses HSHG filtering and exports trend metrics (candidates, returned, query time, payload bytes).
 - [x] Representative legacy vs v2 render parity scenes are covered by frontend tests.
-- [x] Datastore migration/version scaffolding and rollback safety are implemented:
-  - persisted schema bumped to v2 with in-code v1 -> v2 migration.
-  - migration rewrites legacy world-instance references to explicit `instance_world_id`.
-  - startup migration creates an on-disk datastore backup before rewriting migrated state.
+- [x] Datastore schema handling is simplified after v2 cutover:
+  - startup requires exact schema version match (`2`).
+  - unsupported datastore schema versions are rejected and backend falls back to seed snapshots.
   - datastore writes use temp-file + atomic rename.
 
 #### 13.4.3 Sprint 6 Verification
@@ -615,7 +614,7 @@ Status: delivered in section 13.4 (Sprint 6 closeout). Remaining hardening items
 
 Goal: make datastore behavior safer for longer-running and production-like use.
 
-- Add datastore schema migration/version upgrade path.
+- If future schema changes are required, add an offline conversion tool instead of runtime auto-migration.
 - Add periodic backup snapshots and restore tooling.
 - Add startup integrity checks with clear fallback/repair behavior.
 - Add load/save/reset smoke tests against persisted datasets.

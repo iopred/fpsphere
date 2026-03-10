@@ -317,10 +317,6 @@ Delivery semantics:
 ## Datastore schema/versioning
 
 - Persisted world repository schema version is currently `2`.
-- Backend supports loading schema `1` and migrates it to `2` on startup.
-- v1 -> v2 migration behavior:
-  - derive explicit `instance_world_id` from legacy `world_template` dimension when missing.
-  - remove legacy `world_template` / `world_scale` dimensions.
-  - remove legacy `template-root` / `template-definition` entities and descendants.
-- Before writing migrated state back to disk, backend creates a timestamped backup of the previous datastore file.
+- Backend requires an exact schema match on startup (`schema_version == 2`).
+- If schema does not match, persisted state is rejected and backend falls back to seed world snapshots.
 - Datastore writes use a temp-file + atomic rename strategy.
