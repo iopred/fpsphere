@@ -526,11 +526,11 @@ Epic tracking:
 
 #### S6-B Frontend Runtime + Editor
 
-- [ ] `S6-B1` Replace template expansion logic with world-instance expansion/caching.
-- [ ] `S6-B2` Refactor editor world navigation:
+- [x] `S6-B1` Replace template expansion logic with world-instance expansion/caching.
+- [x] `S6-B2` Refactor editor world navigation:
   - `F` enters/exits world context by world id/path, not template-root special casing.
   - maintain clear active world-context indicator in HUD.
-- [ ] `S6-B3` Update delete/edit semantics:
+- [x] `S6-B3` Update delete/edit semantics:
   - deleting an instance removes only the instance reference in the parent world.
   - editing nested content modifies the nested world data, not parent world structure.
 - [ ] `S6-B4` Add render parity tests between legacy and v2 paths for representative scenes.
@@ -538,10 +538,14 @@ Epic tracking:
 #### S6-C Multiplayer + AOI World-Entity Streams
 
 - [x] `S6-C1` Add explicit `world_context` id/path alongside legacy `focus_sphere_id` in multiplayer hello/update messages, with server-side precedence for non-empty `instance_path`.
-- [ ] `S6-C2` Add AOI filtering for world-entity streams using world context + spatial partitioning.
-- [ ] `S6-C3` Ensure template/world editing isolation:
+- [x] `S6-C2` Add AOI filtering for world-entity streams using world context + spatial partitioning.
+  - implementation direction: hierarchical spatial hash grid (HSHG), not octree.
+  - partition order: `world_context` isolation first, then spatial query within context.
+  - deterministic output contract preserved (distance + stable id tie-break).
+- [x] `S6-C3` Ensure template/world editing isolation:
   - editors in nested world contexts do not receive unrelated outer-world entity updates.
 - [ ] `S6-C4` Add AOI world-entity metrics instrumentation and trend reporting (non-blocking for Sprint 6 signoff).
+  - include HSHG metrics: candidate count, returned count, filter time, payload bytes.
 - [x] `S6-C5` Remove legacy `focus_sphere_id` from multiplayer protocol and runtime state after `world_context` rollout verification.
 
 #### S6-D Migration + Cleanup
@@ -571,6 +575,7 @@ Epic tracking:
    - Done gate:
      - nested editors are isolated from unrelated world-entity updates.
      - world-context keyed stream filtering is stable and verified in integration tests.
+     - hierarchical spatial hash grid query path is active for world-entity AOI filtering.
      - fanout/payload metrics are captured for baseline and post-cutover comparison.
 5. Phase 4: Legacy removal
    - Done gate:

@@ -1,7 +1,7 @@
 use crate::aoi::{
     covering_partition_keys, partition_key, select_ids_in_query, AoiDomain, AoiPolicy,
 };
-use crate::protocol::{CommitTarget, WorldSnapshot};
+use crate::protocol::{CommitTarget, SphereEntity, WorldSnapshot};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -143,6 +143,32 @@ fn snapshots_match(left: &MultiplayerPlayerSnapshot, right: &MultiplayerPlayerSn
         && left.last_processed_input_tick == right.last_processed_input_tick
 }
 
+fn dimensions_match(left: &BTreeMap<String, f32>, right: &BTreeMap<String, f32>) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+
+    left.iter()
+        .zip(right.iter())
+        .all(|((left_key, left_value), (right_key, right_value))| {
+            left_key == right_key && left_value.to_bits() == right_value.to_bits()
+        })
+}
+
+fn world_entities_match(left: &SphereEntity, right: &SphereEntity) -> bool {
+    left.id == right.id
+        && left.parent_id == right.parent_id
+        && left.radius.to_bits() == right.radius.to_bits()
+        && left.position_3d[0].to_bits() == right.position_3d[0].to_bits()
+        && left.position_3d[1].to_bits() == right.position_3d[1].to_bits()
+        && left.position_3d[2].to_bits() == right.position_3d[2].to_bits()
+        && dimensions_match(&left.dimensions, &right.dimensions)
+        && left.instance_world_id == right.instance_world_id
+        && left.time_window.start_tick == right.time_window.start_tick
+        && left.time_window.end_tick == right.time_window.end_tick
+        && left.tags == right.tags
+}
+
 pub fn snapshot_players_by_id(
     players: &[MultiplayerPlayerSnapshot],
 ) -> HashMap<String, MultiplayerPlayerSnapshot> {
@@ -151,6 +177,14 @@ pub fn snapshot_players_by_id(
         players_by_id.insert(player.player_id.clone(), player.clone());
     }
     players_by_id
+}
+
+pub fn world_entities_by_id(entities: &[SphereEntity]) -> HashMap<String, SphereEntity> {
+    let mut entities_by_id = HashMap::with_capacity(entities.len());
+    for entity in entities {
+        entities_by_id.insert(entity.id.clone(), entity.clone());
+    }
+    entities_by_id
 }
 
 pub fn build_snapshot_delta(
@@ -189,6 +223,54 @@ pub fn build_snapshot_delta(
         baseline_server_tick,
         upsert_players,
         removed_player_ids,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiplayerWorldEntitySnapshotDelta {
+    pub world_id: String,
+    pub server_tick: u64,
+    pub baseline_server_tick: u64,
+    pub upsert_entities: Vec<SphereEntity>,
+    pub removed_entity_ids: Vec<String>,
+}
+
+pub fn build_world_entity_snapshot_delta(
+    world_id: &str,
+    server_tick: u64,
+    entities: &[SphereEntity],
+    baseline_server_tick: u64,
+    baseline_entities_by_id: &HashMap<String, SphereEntity>,
+) -> MultiplayerWorldEntitySnapshotDelta {
+    let mut next_entities_by_id = HashMap::with_capacity(entities.len());
+    for entity in entities {
+        next_entities_by_id.insert(entity.id.clone(), entity);
+    }
+
+    let mut upsert_entities = entities
+        .iter()
+        .filter(|entity| {
+            baseline_entities_by_id
+                .get(entity.id.as_str())
+                .map_or(true, |previous| !world_entities_match(previous, entity))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    upsert_entities.sort_by(|a, b| a.id.cmp(&b.id));
+
+    let mut removed_entity_ids = baseline_entities_by_id
+        .keys()
+        .filter(|entity_id| !next_entities_by_id.contains_key(*entity_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    removed_entity_ids.sort();
+
+    MultiplayerWorldEntitySnapshotDelta {
+        world_id: world_id.to_string(),
+        server_tick,
+        baseline_server_tick,
+        upsert_entities,
+        removed_entity_ids,
     }
 }
 
@@ -307,6 +389,18 @@ pub enum ServerMultiplayerMessage {
         baseline_server_tick: u64,
         upsert_players: Vec<MultiplayerPlayerSnapshot>,
         removed_player_ids: Vec<String>,
+    },
+    WorldEntitySnapshot {
+        world_id: String,
+        server_tick: u64,
+        entities: Vec<SphereEntity>,
+    },
+    WorldEntitySnapshotDelta {
+        world_id: String,
+        server_tick: u64,
+        baseline_server_tick: u64,
+        upsert_entities: Vec<SphereEntity>,
+        removed_entity_ids: Vec<String>,
     },
     WorldCommitApplied {
         world_id: String,
@@ -841,13 +935,14 @@ impl MultiplayerHub {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_snapshot_delta, filter_snapshot_players_for_focus_context,
-        filter_snapshot_players_for_observer, normalize_world_context, snapshot_players_by_id,
-        MultiplayerHub, MultiplayerPlayerSnapshot, MultiplayerWorldContext,
-        PlayerInputEnqueueResult, ServerMultiplayerMessage,
+        build_snapshot_delta, build_world_entity_snapshot_delta,
+        filter_snapshot_players_for_focus_context, filter_snapshot_players_for_observer,
+        normalize_world_context, snapshot_players_by_id, world_entities_by_id, MultiplayerHub,
+        MultiplayerPlayerSnapshot, MultiplayerWorldContext, PlayerInputEnqueueResult,
+        ServerMultiplayerMessage,
     };
     use crate::aoi::AoiPolicy;
-    use crate::protocol::{example_world_snapshot, CommitTarget};
+    use crate::protocol::{example_world_snapshot, CommitTarget, SphereEntity, TimeWindow};
     use std::collections::{BTreeMap, HashMap};
     use tokio::time::{timeout, Duration};
 
@@ -1751,5 +1846,63 @@ mod tests {
 
         assert!(delta.upsert_players.is_empty());
         assert!(delta.removed_player_ids.is_empty());
+    }
+
+    fn make_world_entity(id: &str, position_3d: [f32; 3], radius: f32) -> SphereEntity {
+        SphereEntity {
+            id: id.to_string(),
+            parent_id: Some("sphere-world-001".to_string()),
+            radius,
+            position_3d,
+            dimensions: BTreeMap::from([("money".to_string(), 0.2), ("heat".to_string(), 0.4)]),
+            instance_world_id: None,
+            time_window: TimeWindow {
+                start_tick: 0,
+                end_tick: None,
+            },
+            tags: vec!["resource".to_string()],
+        }
+    }
+
+    #[test]
+    fn build_world_entity_snapshot_delta_tracks_upserts_and_removals() {
+        let baseline_entities = vec![
+            make_world_entity("entity-a", [0.0, 0.0, 0.0], 1.0),
+            make_world_entity("entity-b", [1.0, 0.0, 0.0], 1.0),
+        ];
+        let next_entities = vec![
+            make_world_entity("entity-a", [0.5, 0.0, 0.0], 1.0),
+            make_world_entity("entity-c", [2.0, 0.0, 0.0], 1.2),
+        ];
+        let baseline_by_id = world_entities_by_id(&baseline_entities);
+        let delta = build_world_entity_snapshot_delta(
+            "world-main",
+            12,
+            &next_entities,
+            11,
+            &baseline_by_id,
+        );
+
+        assert_eq!(delta.world_id, "world-main");
+        assert_eq!(delta.server_tick, 12);
+        assert_eq!(delta.baseline_server_tick, 11);
+        assert_eq!(delta.removed_entity_ids, vec!["entity-b".to_string()]);
+        assert_eq!(delta.upsert_entities.len(), 2);
+        assert_eq!(delta.upsert_entities[0].id, "entity-a");
+        assert_eq!(delta.upsert_entities[1].id, "entity-c");
+    }
+
+    #[test]
+    fn build_world_entity_snapshot_delta_is_empty_when_state_matches_baseline() {
+        let entities = vec![
+            make_world_entity("entity-a", [0.0, 0.0, 0.0], 1.0),
+            make_world_entity("entity-b", [1.0, 0.0, 0.0], 1.0),
+        ];
+        let baseline_by_id = world_entities_by_id(&entities);
+        let delta =
+            build_world_entity_snapshot_delta("world-main", 12, &entities, 11, &baseline_by_id);
+
+        assert!(delta.upsert_entities.is_empty());
+        assert!(delta.removed_entity_ids.is_empty());
     }
 }

@@ -1,5 +1,6 @@
 mod aoi;
 mod datastore;
+mod hshg;
 mod multiplayer;
 mod protocol;
 
@@ -11,18 +12,20 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use datastore::FileWorldDatastore;
+use hshg::{HierarchicalSpatialHashGrid, HshgEntry};
 use multiplayer::{
-    build_snapshot_delta, filter_snapshot_players_for_observer,
+    build_snapshot_delta, build_world_entity_snapshot_delta, filter_snapshot_players_for_observer,
     master_world_commit_context_matches, normalize_world_context, snapshot_players_by_id,
-    ClientMultiplayerMessage, MultiplayerHub, MultiplayerPlayerSnapshot, MultiplayerWorldContext,
-    PlayerInputEnqueueResult, ServerMultiplayerMessage,
+    world_entities_by_id, ClientMultiplayerMessage, MultiplayerHub, MultiplayerPlayerSnapshot,
+    MultiplayerWorldContext, PlayerInputEnqueueResult, ServerMultiplayerMessage,
 };
 use protocol::{
     example_seed_world_snapshots, CommitFailure, CommitOperation, CommitRequest, CommitResponse,
-    CommitTarget, TemporalWorldQuery, WorldMutationFailure, WorldRepository, WorldSnapshot,
+    CommitTarget, SphereEntity, TemporalWorldQuery, WorldMutationFailure, WorldRepository,
+    WorldSnapshot,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
@@ -31,6 +34,7 @@ use tokio::sync::{watch, RwLock};
 
 const SNAPSHOT_DELTA_REBASE_INTERVAL: u32 = 90;
 const DEFAULT_DATASTORE_PATH: &str = "data/world-repository.json";
+const WORLD_ENTITY_HSHG_MAX_LEVELS: u8 = 7;
 
 #[derive(Clone)]
 struct AppState {
@@ -104,6 +108,12 @@ struct SessionSnapshotBaseline {
     delta_frames_since_full: u32,
 }
 
+struct SessionWorldEntityBaseline {
+    server_tick: u64,
+    entities_by_id: HashMap<String, SphereEntity>,
+    delta_frames_since_full: u32,
+}
+
 struct SessionMessageUpdate {
     updated_user_id: Option<String>,
     updated_world_context: Option<MultiplayerWorldContext>,
@@ -154,6 +164,119 @@ fn should_deliver_world_commit_for_session(
                 .unwrap_or(false)
         }
     }
+}
+
+fn world_context_focus_sphere_id(world_context: Option<&MultiplayerWorldContext>) -> Option<&str> {
+    world_context?.instance_path.last().map(String::as_str)
+}
+
+fn collect_context_entities(
+    world: &WorldSnapshot,
+    world_context: Option<&MultiplayerWorldContext>,
+) -> Vec<SphereEntity> {
+    let mut entities_by_id = HashMap::<String, &SphereEntity>::with_capacity(world.entities.len());
+    let mut children_by_parent = HashMap::<String, Vec<String>>::new();
+
+    for entity in &world.entities {
+        entities_by_id.insert(entity.id.clone(), entity);
+        if let Some(parent_id) = &entity.parent_id {
+            children_by_parent
+                .entry(parent_id.clone())
+                .or_default()
+                .push(entity.id.clone());
+        }
+    }
+
+    if let Some(focus_sphere_id) = world_context_focus_sphere_id(world_context) {
+        let focus_id = focus_sphere_id.trim();
+        if let Some(focus_entity) = entities_by_id.get(focus_id) {
+            let mut included_ids = HashSet::<String>::new();
+            let mut stack = vec![focus_entity.id.clone()];
+            while let Some(current_id) = stack.pop() {
+                if !included_ids.insert(current_id.clone()) {
+                    continue;
+                }
+                if let Some(children) = children_by_parent.get(current_id.as_str()) {
+                    stack.extend(children.iter().cloned());
+                }
+            }
+
+            let mut filtered = world
+                .entities
+                .iter()
+                .filter(|entity| included_ids.contains(entity.id.as_str()))
+                .cloned()
+                .collect::<Vec<_>>();
+            filtered.sort_by(|left, right| left.id.cmp(&right.id));
+            return filtered;
+        }
+    }
+
+    let template_root_ids = world
+        .entities
+        .iter()
+        .filter(|entity| entity.tags.iter().any(|tag| tag == "template-root"))
+        .map(|entity| entity.id.clone())
+        .collect::<HashSet<_>>();
+    if template_root_ids.is_empty() {
+        let mut all_entities = world.entities.clone();
+        all_entities.sort_by(|left, right| left.id.cmp(&right.id));
+        return all_entities;
+    }
+
+    let mut filtered = Vec::<SphereEntity>::new();
+    'entity: for entity in &world.entities {
+        if template_root_ids.contains(entity.id.as_str()) {
+            continue;
+        }
+
+        let mut cursor_parent_id = entity.parent_id.clone();
+        while let Some(parent_id) = cursor_parent_id {
+            if template_root_ids.contains(parent_id.as_str()) {
+                continue 'entity;
+            }
+
+            cursor_parent_id = entities_by_id
+                .get(parent_id.as_str())
+                .and_then(|parent| parent.parent_id.clone());
+        }
+
+        filtered.push(entity.clone());
+    }
+
+    filtered.sort_by(|left, right| left.id.cmp(&right.id));
+    filtered
+}
+
+fn filter_context_entities_for_observer(
+    entities: &[SphereEntity],
+    observer_position: [f32; 3],
+    policy: AoiPolicy,
+) -> Vec<SphereEntity> {
+    let query = policy.query_for(aoi::AoiDomain::WorldEntities, observer_position);
+    if entities.is_empty() || query.max_results == 0 {
+        return Vec::new();
+    }
+
+    let mut index =
+        HierarchicalSpatialHashGrid::new(policy.partition_cell_edge, WORLD_ENTITY_HSHG_MAX_LEVELS);
+    index.rebuild(entities.iter().map(|entity| HshgEntry {
+        id: entity.id.clone(),
+        center: entity.position_3d,
+        radius: entity.radius,
+    }));
+
+    let included_ids = index
+        .query_radius(query.center, query.radius, query.max_results)
+        .into_iter()
+        .collect::<HashSet<_>>();
+    let mut filtered = entities
+        .iter()
+        .filter(|entity| included_ids.contains(entity.id.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    filtered.sort_by(|left, right| left.id.cmp(&right.id));
+    filtered
 }
 
 #[tokio::main]
@@ -592,6 +715,7 @@ async fn handle_ws_connection(
     let mut session_user_id = user_id;
     let mut session_world_context: Option<MultiplayerWorldContext> = None;
     let mut snapshot_baseline: Option<SessionSnapshotBaseline> = None;
+    let mut world_entity_baseline: Option<SessionWorldEntityBaseline> = None;
     let player = state
         .multiplayer
         .add_player_with_visibility(session_user_id.clone(), world_id.clone(), visible_to_others)
@@ -671,6 +795,11 @@ async fn handle_ws_connection(
                                 )
                                 .await;
                             let next_players_by_id = snapshot_players_by_id(&filtered_players);
+                            let observer_position = filtered_players
+                                .iter()
+                                .find(|candidate| candidate.player_id == player.player_id)
+                                .map(|candidate| candidate.position_3d)
+                                .unwrap_or([0.0, -2.5, 16.0]);
                             let should_force_full = snapshot_baseline
                                 .as_ref()
                                 .map_or(true, |baseline| {
@@ -680,7 +809,7 @@ async fn handle_ws_connection(
 
                             if should_force_full {
                                 let snapshot = ServerMultiplayerMessage::StateSnapshot {
-                                    world_id: snapshot_world_id,
+                                    world_id: snapshot_world_id.clone(),
                                     server_tick,
                                     players: filtered_players,
                                 };
@@ -693,35 +822,55 @@ async fn handle_ws_connection(
                                     players_by_id: next_players_by_id,
                                     delta_frames_since_full: 0,
                                 });
-                                continue;
+                            } else {
+                                let baseline = snapshot_baseline
+                                    .as_ref()
+                                    .expect("baseline should be present when not forcing full");
+                                let delta = build_snapshot_delta(
+                                    snapshot_world_id.as_str(),
+                                    server_tick,
+                                    &filtered_players,
+                                    baseline.server_tick,
+                                    &baseline.players_by_id,
+                                );
+                                let delta_message = ServerMultiplayerMessage::StateSnapshotDelta {
+                                    world_id: delta.world_id,
+                                    server_tick: delta.server_tick,
+                                    baseline_server_tick: delta.baseline_server_tick,
+                                    upsert_players: delta.upsert_players,
+                                    removed_player_ids: delta.removed_player_ids,
+                                };
+                                if send_ws_message(&mut socket, &delta_message).await.is_err() {
+                                    break;
+                                }
+
+                                snapshot_baseline = Some(SessionSnapshotBaseline {
+                                    server_tick,
+                                    players_by_id: next_players_by_id,
+                                    delta_frames_since_full: baseline
+                                        .delta_frames_since_full
+                                        .saturating_add(1),
+                                });
                             }
 
-                            let baseline = snapshot_baseline
-                                .as_ref()
-                                .expect("baseline should be present when not forcing full");
-                            let delta = build_snapshot_delta(
+                            match send_world_entity_snapshot_for_session(
+                                &state,
+                                &mut socket,
                                 snapshot_world_id.as_str(),
                                 server_tick,
-                                &filtered_players,
-                                baseline.server_tick,
-                                &baseline.players_by_id,
-                            );
-                            let delta_message = ServerMultiplayerMessage::StateSnapshotDelta {
-                                world_id: delta.world_id,
-                                server_tick: delta.server_tick,
-                                baseline_server_tick: delta.baseline_server_tick,
-                                upsert_players: delta.upsert_players,
-                                removed_player_ids: delta.removed_player_ids,
-                            };
-                            if send_ws_message(&mut socket, &delta_message).await.is_err() {
-                                break;
+                                observer_position,
+                                session_world_context.as_ref(),
+                                world_entity_baseline.take(),
+                            )
+                            .await
+                            {
+                                Ok(next_baseline) => {
+                                    world_entity_baseline = next_baseline;
+                                }
+                                Err(()) => {
+                                    break;
+                                }
                             }
-
-                            snapshot_baseline = Some(SessionSnapshotBaseline {
-                                server_tick,
-                                players_by_id: next_players_by_id,
-                                delta_frames_since_full: baseline.delta_frames_since_full.saturating_add(1),
-                            });
                         }
                     }
                     Ok(ServerMultiplayerMessage::WorldCommitApplied {
@@ -884,6 +1033,76 @@ async fn send_ws_message(
         .send(Message::Text(payload.into()))
         .await
         .map_err(|_| ())
+}
+
+async fn send_world_entity_snapshot_for_session(
+    state: &AppState,
+    socket: &mut WebSocket,
+    world_id: &str,
+    server_tick: u64,
+    observer_position: [f32; 3],
+    session_world_context: Option<&MultiplayerWorldContext>,
+    baseline: Option<SessionWorldEntityBaseline>,
+) -> Result<Option<SessionWorldEntityBaseline>, ()> {
+    let world = {
+        let repository = state.repository.read().await;
+        repository.get_world_snapshot(world_id, None)
+    };
+
+    let Some(world) = world else {
+        return Ok(None);
+    };
+
+    let context_entities = collect_context_entities(&world, session_world_context);
+    let filtered_entities = filter_context_entities_for_observer(
+        &context_entities,
+        observer_position,
+        AoiPolicy::default(),
+    );
+    let next_entities_by_id = world_entities_by_id(&filtered_entities);
+
+    let should_force_full = baseline.as_ref().map_or(true, |value| {
+        value.delta_frames_since_full >= SNAPSHOT_DELTA_REBASE_INTERVAL
+            || server_tick <= value.server_tick
+    });
+
+    if should_force_full {
+        let snapshot = ServerMultiplayerMessage::WorldEntitySnapshot {
+            world_id: world_id.to_string(),
+            server_tick,
+            entities: filtered_entities,
+        };
+        send_ws_message(socket, &snapshot).await?;
+
+        return Ok(Some(SessionWorldEntityBaseline {
+            server_tick,
+            entities_by_id: next_entities_by_id,
+            delta_frames_since_full: 0,
+        }));
+    }
+
+    let previous = baseline.expect("baseline should exist for world entity delta");
+    let delta = build_world_entity_snapshot_delta(
+        world_id,
+        server_tick,
+        &filtered_entities,
+        previous.server_tick,
+        &previous.entities_by_id,
+    );
+    let delta_message = ServerMultiplayerMessage::WorldEntitySnapshotDelta {
+        world_id: delta.world_id,
+        server_tick: delta.server_tick,
+        baseline_server_tick: delta.baseline_server_tick,
+        upsert_entities: delta.upsert_entities,
+        removed_entity_ids: delta.removed_entity_ids,
+    };
+    send_ws_message(socket, &delta_message).await?;
+
+    Ok(Some(SessionWorldEntityBaseline {
+        server_tick,
+        entities_by_id: next_entities_by_id,
+        delta_frames_since_full: previous.delta_frames_since_full.saturating_add(1),
+    }))
 }
 
 #[cfg(test)]

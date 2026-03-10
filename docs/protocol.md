@@ -240,6 +240,48 @@ Server -> client:
   "removed_player_ids": ["player-8"]
 }
 ```
+- `world_entity_snapshot`:
+```json
+{
+  "type": "world_entity_snapshot",
+  "world_id": "world-main",
+  "server_tick": 100,
+  "entities": [
+    {
+      "id": "sphere-resource-001",
+      "parent_id": "sphere-world-001",
+      "radius": 3.0,
+      "position_3d": [3.0, -3.0, 8.0],
+      "dimensions": { "money": 1.0 },
+      "instance_world_id": null,
+      "time_window": { "start_tick": 0, "end_tick": null },
+      "tags": ["resource"]
+    }
+  ]
+}
+```
+- `world_entity_snapshot_delta`:
+```json
+{
+  "type": "world_entity_snapshot_delta",
+  "world_id": "world-main",
+  "server_tick": 101,
+  "baseline_server_tick": 100,
+  "upsert_entities": [
+    {
+      "id": "sphere-resource-001",
+      "parent_id": "sphere-world-001",
+      "radius": 3.1,
+      "position_3d": [3.2, -3.0, 8.1],
+      "dimensions": { "money": 1.0 },
+      "instance_world_id": null,
+      "time_window": { "start_tick": 0, "end_tick": null },
+      "tags": ["resource"]
+    }
+  ],
+  "removed_entity_ids": ["sphere-old-001"]
+}
+```
 - `world_commit_applied`:
 ```json
 {
@@ -263,6 +305,9 @@ Delivery semantics:
 - `state_snapshot`/delta streams are partitioned by normalized `world_context` key:
   - root context (`world_context = null` or empty path) receives only root-context players.
   - nested contexts receive only players in the same `{root_world_id, instance_path}`.
+- `world_entity_snapshot`/delta streams are filtered per observer by:
+  - world context partition first (active context subtree),
+  - then hierarchical spatial hash grid AOI selection (`AoiDomain::WorldEntities` policy).
 - `saved_to = master`: delivered only when session `world_context` matches commit `world_context`.
 - `saved_to = user`: delivered only to connections for that same `user_id` and `world_id`.
 
